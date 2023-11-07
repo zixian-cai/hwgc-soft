@@ -2,13 +2,14 @@
 extern crate lazy_static;
 
 use anyhow::Result;
-use prost::Message;
-use std::collections::{HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use std::{collections::HashMap, fs::File, io::Read};
 
-include!(concat!(env!("OUT_DIR"), "/mmtk.util.sanity.rs"));
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Arc, Mutex};
+
+pub use crate::heapdump::*;
+use std::time::Instant;
+
+mod heapdump;
 
 lazy_static! {
     static ref TIBS: Mutex<HashMap<u64, Arc<Tib>>> = Mutex::new(HashMap::new());
@@ -23,7 +24,7 @@ fn wrap_libc_call<T: PartialEq>(f: &dyn Fn() -> T, expect: T) -> Result<()> {
     }
 }
 
-fn dzmmap_noreplace(start: u64, size: usize) -> Result<()> {
+pub fn dzmmap_noreplace(start: u64, size: usize) -> Result<()> {
     let prot = libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC;
     let flags =
         libc::MAP_ANON | libc::MAP_PRIVATE | libc::MAP_FIXED_NOREPLACE | libc::MAP_NORESERVE;
@@ -42,7 +43,7 @@ fn mmap_fixed(start: u64, size: usize, prot: libc::c_int, flags: libc::c_int) ->
 
 #[repr(C)]
 #[derive(Debug)]
-struct Tib {
+pub struct Tib {
     ttype: TibType,
     oop_map_blocks: Vec<OopMapBlock>,
     instance_mirror_info: Option<(u64, u64)>,
@@ -63,7 +64,7 @@ impl Tib {
         tibs.get(&klass).unwrap().clone()
     }
 
-    fn objarray(klass: u64) -> Arc<Tib> {
+    pub fn objarray(klass: u64) -> Arc<Tib> {
         Self::insert_with_cache(klass, || Tib {
             ttype: TibType::ObjArray,
             oop_map_blocks: vec![],
@@ -100,7 +101,7 @@ impl Tib {
         oop_map_blocks
     }
 
-    fn non_objarray(klass: u64, obj: &HeapObject) -> Arc<Tib> {
+    pub fn non_objarray(klass: u64, obj: &HeapObject) -> Arc<Tib> {
         let ombs = Self::encode_oop_map_blocks(obj);
         // println!("{:?}", ombs);
         let sum: u64 = ombs.iter().map(|omb| omb.count).sum();
@@ -123,7 +124,7 @@ impl Tib {
         }
     }
 
-    fn num_edges(&self) -> u64 {
+    pub fn num_edges(&self) -> u64 {
         let mut sum = self.oop_map_blocks.iter().map(|omb| omb.count).sum();
         if let Some((_, count)) = self.instance_mirror_info {
             sum += count;
@@ -205,7 +206,7 @@ unsafe fn scan_object(o: u64, mark_queue: &mut VecDeque<u64>, objects: &HashMap<
     debug_assert_eq!(num_edges, objects.get(&o).unwrap().edges.len())
 }
 
-unsafe fn transitive_closure(
+pub unsafe fn transitive_closure(
     roots: &[RootEdge],
     objects: &HashMap<u64, HeapObject>,
     mark_sense: u8,
@@ -234,7 +235,7 @@ unsafe fn transitive_closure(
     );
 }
 
-fn sanity_trace(roots: &[RootEdge], objects: &HashMap<u64, HeapObject>) -> usize {
+pub fn sanity_trace(roots: &[RootEdge], objects: &HashMap<u64, HeapObject>) -> usize {
     let mut reachable_objects: HashSet<u64> = HashSet::new();
     let mut mark_stack: Vec<u64> = vec![];
     for root in roots {
@@ -257,84 +258,4 @@ fn sanity_trace(roots: &[RootEdge], objects: &HashMap<u64, HeapObject>) -> usize
         }
     }
     reachable_objects.len()
-}
-
-pub fn main() -> Result<()> {
-    let file = File::open("heapdump.20.binpb.zst")?;
-    let mut reader = zstd::Decoder::new(file)?;
-    let mut buf = vec![];
-    reader.read_to_end(&mut buf)?;
-    let heapdump = HeapDump::decode(buf.as_slice())?;
-    for s in &heapdump.spaces {
-        println!("Mapping {} at 0x{:x}", s.name, s.start);
-        dzmmap_noreplace(s.start, (s.end - s.start) as usize)?;
-    }
-    let mut objects: HashMap<u64, HeapObject> = HashMap::new();
-    for object in &heapdump.objects {
-        objects.insert(object.start, object.clone());
-    }
-    let start = Instant::now();
-    // for o in &heapdump.objects {
-    //     println!("{:?}", o);
-    // }
-    for o in &heapdump.objects {
-        // unsafe {
-        //     std::ptr::write::<u64>((o.start + 8) as *mut u64, o.start);
-        // }
-        let tib = if o.objarray_length.is_some() {
-            Tib::objarray(o.klass)
-        } else {
-            Tib::non_objarray(o.klass, o)
-        };
-        if o.objarray_length.is_none() {
-            debug_assert_eq!(tib.num_edges(), o.edges.len() as u64);
-        }
-        // We need to leak this, so the underlying memory won't be collected
-        let tib_ptr = Arc::into_raw(tib);
-        // println!(
-        //     "Object: 0x{:x}, Klass: 0x{:x}, TIB: {:?}, TIB ptr: 0x{:x}",
-        //     o.start, o.klass, tib , tib_ptr as u64
-        // );
-        // Initialize the object
-        // Set tib
-        unsafe {
-            std::ptr::write::<u64>((o.start + 8) as *mut u64, tib_ptr as u64);
-        }
-        // Write out array length for obj array
-        if let Some(l) = o.objarray_length {
-            unsafe {
-                std::ptr::write::<u64>((o.start + 16) as *mut u64, l);
-            }
-        }
-        // Write out each non-zero ref field
-        for e in &o.edges {
-            unsafe {
-                std::ptr::write::<u64>(e.slot as *mut u64, e.objref);
-            }
-        }
-    }
-    let elapsed = start.elapsed();
-    println!(
-        "Finish deserializing the heapdump, {} objects in {} ms",
-        heapdump.objects.len(),
-        elapsed.as_micros() as f64 / 1000f64
-    );
-    println!(
-        "Sanity trace reporting {} reachable objects",
-        sanity_trace(&heapdump.roots, &objects)
-    );
-    let mut mark_sense: u8 = 0;
-    unsafe {
-        for i in 0..10000 {
-            mark_sense = (i % 2 != 0) as u8;
-            transitive_closure(&heapdump.roots, &objects, mark_sense);
-        }
-    }
-    for o in &heapdump.objects {
-        let mark_word = o.start as *mut u8;
-        if unsafe { *mark_word } != mark_sense {
-            println!("{} not marked by transitive closure", o.start);
-        }
-    }
-    Ok(())
 }

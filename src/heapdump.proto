@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package mmtk.util.sanity;
+package heapdump.generated_src;
 
 message HeapDump {
     repeated HeapObject objects = 1;
