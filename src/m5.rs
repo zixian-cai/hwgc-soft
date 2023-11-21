@@ -1,7 +1,6 @@
 use libc::{c_char, c_uint, c_void};
 
 #[link(name = "m5")]
-#[allow(dead_code)]
 extern "C" {
     pub fn m5_arm(address: u64);
     pub fn m5_quiesce();

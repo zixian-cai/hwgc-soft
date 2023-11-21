@@ -8,9 +8,11 @@ use anyhow::Result;
 
 use hwgc_soft::*;
 
+#[cfg(feature = "zsim")]
+use zsim_hooks::*;
+
 pub fn main() -> Result<()> {
     env_logger::init();
-
     let heapdump = HeapDump::from_binpb_zst("heapdump.20.binpb.zst")?;
     heapdump.map_spaces()?;
     let mut objects: HashMap<u64, HeapObject> = HashMap::new();
@@ -30,12 +32,24 @@ pub fn main() -> Result<()> {
         sanity_trace(&heapdump.roots, &objects)
     );
     let mut mark_sense: u8 = 0;
+    #[cfg(feature = "m5")]
     unsafe {
-        for i in 0..10000 {
-            mark_sense = (i % 2 != 0) as u8;
+        m5::m5_reset_stats(0, 0);
+    }
+    #[cfg(feature = "zsim")]
+    zsim_roi_begin();
+    unsafe {
+        for i in 0..2 {
+            mark_sense = (i % 2 == 0) as u8;
             transitive_closure(&heapdump.roots, &objects, mark_sense);
         }
     }
+    #[cfg(feature = "m5")]
+    unsafe {
+        m5::m5_dump_reset_stats(0, 0);
+    }
+    #[cfg(feature = "zsim")]
+    zsim_roi_end();
     for o in &heapdump.objects {
         let mark_word = o.start as *mut u8;
         if unsafe { *mark_word } != mark_sense {

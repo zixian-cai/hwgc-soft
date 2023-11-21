@@ -6,7 +6,7 @@ extern crate log;
 
 mod heapdump;
 #[cfg(feature = "m5")]
-mod m5;
+pub mod m5;
 mod mark;
 mod sanity;
 mod tib;

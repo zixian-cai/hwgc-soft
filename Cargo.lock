@@ -142,6 +142,7 @@ dependencies = [
  "log",
  "prost",
  "prost-build",
+ "zsim-hooks",
  "zstd",
 ]
 
@@ -522,6 +523,12 @@ name = "windows_x86_64_msvc"
 version = "0.48.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed94fce61571a4006852b7389a063ab983c02eb1bb37b47f8272ce92d06d9538"
+
+[[package]]
+name = "zsim-hooks"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "550b23f34d83b4160ce5cc857e4a4ca0ce220751f748689ef7946c25c4e09748"
 
 [[package]]
 name = "zstd"
