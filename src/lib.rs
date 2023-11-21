@@ -5,6 +5,7 @@ extern crate lazy_static;
 extern crate log;
 
 mod heapdump;
+mod m5;
 mod mark;
 mod sanity;
 mod tib;
