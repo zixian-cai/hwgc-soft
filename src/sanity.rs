@@ -1,12 +1,17 @@
-use crate::HeapObject;
-use crate::RootEdge;
+use crate::HeapDump;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-pub fn sanity_trace(roots: &[RootEdge], objects: &HashMap<u64, HeapObject>) -> usize {
+pub fn sanity_trace(heapdump: &HeapDump) -> usize {
+    let mut objects: HashMap<_, _> = HashMap::new();
+    for object in &heapdump.objects {
+        objects.insert(object.start, object.clone());
+    }
+
     let mut reachable_objects: HashSet<u64> = HashSet::new();
     let mut mark_stack: Vec<u64> = vec![];
-    for root in roots {
+    for root in &heapdump.roots {
         debug_assert!(objects.contains_key(&root.objref));
         mark_stack.push(root.objref);
     }

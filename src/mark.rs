@@ -1,7 +1,6 @@
-use crate::tib::Tib;
-use crate::HeapObject;
+use crate::ObjectModel;
 use crate::RootEdge;
-use std::collections::HashMap;
+
 use std::collections::VecDeque;
 use std::time::Instant;
 
@@ -22,10 +21,10 @@ unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
-pub unsafe fn transitive_closure(
+pub unsafe fn transitive_closure<O: ObjectModel>(
     roots: &[RootEdge],
-    objects: &HashMap<u64, HeapObject>,
     mark_sense: u8,
+    object_model: &mut O,
 ) {
     let start: Instant = Instant::now();
     // A queue of objref (possibly null)
@@ -40,7 +39,7 @@ pub unsafe fn transitive_closure(
             // not previously marked, now marked
             // now scan
             marked_object += 1;
-            Tib::scan_object(o, &mut mark_queue, objects);
+            object_model.scan_object(o, &mut mark_queue);
         }
     }
     let elapsed = start.elapsed();

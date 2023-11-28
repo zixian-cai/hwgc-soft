@@ -1,4 +1,4 @@
-use crate::HeapObject;
+use crate::{HeapDump, HeapObject, ObjectModel};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +8,7 @@ lazy_static! {
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct Tib {
+struct Tib {
     ttype: TibType,
     oop_map_blocks: Vec<OopMapBlock>,
     instance_mirror_info: Option<(u64, u64)>,
@@ -16,7 +16,7 @@ pub struct Tib {
 
 #[repr(u8)]
 #[derive(Debug)]
-pub enum TibType {
+enum TibType {
     Ordinary = 0,
     ObjArray = 1,
     InstanceMirror = 2,
@@ -29,7 +29,7 @@ impl Tib {
         tibs.get(&klass).unwrap().clone()
     }
 
-    pub fn objarray(klass: u64) -> Arc<Tib> {
+    fn objarray(klass: u64) -> Arc<Tib> {
         Self::insert_with_cache(klass, || Tib {
             ttype: TibType::ObjArray,
             oop_map_blocks: vec![],
@@ -66,7 +66,7 @@ impl Tib {
         oop_map_blocks
     }
 
-    pub fn non_objarray(klass: u64, obj: &HeapObject) -> Arc<Tib> {
+    fn non_objarray(klass: u64, obj: &HeapObject) -> Arc<Tib> {
         let ombs = Self::encode_oop_map_blocks(obj);
         // println!("{:?}", ombs);
         let sum: u64 = ombs.iter().map(|omb| omb.count).sum();
@@ -89,7 +89,7 @@ impl Tib {
         }
     }
 
-    pub fn num_edges(&self) -> u64 {
+    fn num_edges(&self) -> u64 {
         let mut sum = self.oop_map_blocks.iter().map(|omb| omb.count).sum();
         if let Some((_, count)) = self.instance_mirror_info {
             sum += count;
@@ -97,7 +97,7 @@ impl Tib {
         sum
     }
 
-    pub unsafe fn scan_object(
+    unsafe fn scan_object(
         o: u64,
         mark_queue: &mut VecDeque<u64>,
         objects: &HashMap<u64, HeapObject>,
@@ -156,4 +156,74 @@ impl Tib {
 struct OopMapBlock {
     offset: u64,
     count: u64,
+}
+
+pub struct OpenJDKObjectModel {
+    objects: HashMap<u64, HeapObject>,
+}
+
+impl Default for OpenJDKObjectModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OpenJDKObjectModel {
+    pub fn new() -> Self {
+        OpenJDKObjectModel {
+            // For debugging
+            objects: HashMap::new(),
+        }
+    }
+}
+
+impl ObjectModel for OpenJDKObjectModel {
+    fn restore_objects(&mut self, heapdump: &HeapDump) {
+        for object in &heapdump.objects {
+            self.objects.insert(object.start, object.clone());
+        }
+
+        for o in &heapdump.objects {
+            // unsafe {
+            //     std::ptr::write::<u64>((o.start + 8) as *mut u64, o.start);
+            // }
+            let tib = if o.objarray_length.is_some() {
+                Tib::objarray(o.klass)
+            } else {
+                Tib::non_objarray(o.klass, o)
+            };
+            if o.objarray_length.is_none() {
+                debug_assert_eq!(tib.num_edges(), o.edges.len() as u64);
+            }
+            // We need to leak this, so the underlying memory won't be collected
+            let tib_ptr = Arc::into_raw(tib);
+            // println!(
+            //     "Object: 0x{:x}, Klass: 0x{:x}, TIB: {:?}, TIB ptr: 0x{:x}",
+            //     o.start, o.klass, tib , tib_ptr as u64
+            // );
+            // Initialize the object
+            // Set tib
+            unsafe {
+                std::ptr::write::<u64>((o.start + 8) as *mut u64, tib_ptr as u64);
+            }
+            // Write out array length for obj array
+            if let Some(l) = o.objarray_length {
+                unsafe {
+                    std::ptr::write::<u64>((o.start + 16) as *mut u64, l);
+                }
+            }
+            // Write out each non-zero ref field
+            for e in &o.edges {
+                unsafe {
+                    std::ptr::write::<u64>(e.slot as *mut u64, e.objref);
+                }
+            }
+        }
+    }
+
+    fn scan_object(&mut self, o: u64, mark_queue: &mut VecDeque<u64>) {
+        unsafe {
+            Tib::scan_object(o, mark_queue, &self.objects);
+        }
+    }
 }
