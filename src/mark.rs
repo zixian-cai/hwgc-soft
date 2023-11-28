@@ -1,3 +1,4 @@
+use crate::object_model::Header;
 use crate::ObjectModel;
 
 use std::collections::VecDeque;
@@ -10,12 +11,14 @@ unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
         // skip null
         return false;
     }
+    let mut header = Header::load(o);
     // Return false if already marked
-    let mark_word = o as *mut u8;
-    if *mark_word == mark_sense {
+    let mark_byte = header.get_mark_byte();
+    if mark_byte == mark_sense {
         false
     } else {
-        *mark_word = mark_sense;
+        header.set_mark_byte(mark_sense);
+        header.store(o);
         true
     }
 }
@@ -47,8 +50,8 @@ pub unsafe fn transitive_closure<O: ObjectModel>(mark_sense: u8, object_model: &
 
 pub fn verify_mark<O: ObjectModel>(mark_sense: u8, object_model: &mut O) {
     for o in object_model.objects() {
-        let mark_word = *o as *const u8;
-        if unsafe { *mark_word } != mark_sense {
+        let header = Header::load(*o);
+        if header.get_mark_byte() != mark_sense {
             info!("0x{:x} not marked by transitive closure", o);
         }
     }

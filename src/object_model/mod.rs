@@ -10,6 +10,8 @@ pub trait ObjectModel {
 }
 
 mod bidirectional;
+mod header;
 mod openjdk;
 pub use bidirectional::BidirectionalObjectModel;
+pub use header::Header;
 pub use openjdk::OpenJDKObjectModel;
