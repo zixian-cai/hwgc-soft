@@ -9,5 +9,7 @@ pub trait ObjectModel {
     fn objects(&self) -> &[u64];
 }
 
+mod bidirectional;
 mod openjdk;
+pub use bidirectional::BidirectionalObjectModel;
 pub use openjdk::OpenJDKObjectModel;

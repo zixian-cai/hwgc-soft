@@ -14,7 +14,8 @@ use clap::{Parser, ValueEnum};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
 enum ObjectModelChoice {
-    OpenJDK,
+    Openjdk,
+    Bidirectional,
 }
 
 #[derive(Parser, Debug)]
@@ -70,8 +71,11 @@ pub fn main() -> Result<()> {
     let heapdump = HeapDump::from_binpb_zst(args.path)?;
     heapdump.map_spaces()?;
     match args.object_model {
-        ObjectModelChoice::OpenJDK => {
+        ObjectModelChoice::Openjdk => {
             reified_main(OpenJDKObjectModel::new(), heapdump, args.iterations);
+        }
+        ObjectModelChoice::Bidirectional => {
+            reified_main(BidirectionalObjectModel::new(), heapdump, args.iterations);
         }
     }
     Ok(())
