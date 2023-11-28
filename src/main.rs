@@ -16,6 +16,7 @@ use clap::{Parser, ValueEnum};
 enum ObjectModelChoice {
     Openjdk,
     Bidirectional,
+    BidirectionalFallback,
 }
 
 #[derive(Parser, Debug)]
@@ -75,7 +76,18 @@ pub fn main() -> Result<()> {
             reified_main(OpenJDKObjectModel::new(), heapdump, args.iterations);
         }
         ObjectModelChoice::Bidirectional => {
-            reified_main(BidirectionalObjectModel::new(), heapdump, args.iterations);
+            reified_main(
+                BidirectionalObjectModel::<true>::new(),
+                heapdump,
+                args.iterations,
+            );
+        }
+        ObjectModelChoice::BidirectionalFallback => {
+            reified_main(
+                BidirectionalObjectModel::<false>::new(),
+                heapdump,
+                args.iterations,
+            );
         }
     }
     Ok(())

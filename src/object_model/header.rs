@@ -2,7 +2,11 @@
 pub struct Header(u64);
 
 impl Header {
-    pub fn load(o: u64) -> Header {
+    pub fn new() -> Self {
+        Header(0)
+    }
+
+    pub fn load(o: u64) -> Self {
         unsafe { Header(*(o as *mut u64)) }
     }
 

@@ -3,13 +3,15 @@ use std::sync::{Arc, Mutex};
 
 use crate::{HeapDump, HeapObject, ObjectModel};
 
-pub struct BidirectionalObjectModel {
+use super::Header;
+
+pub struct BidirectionalObjectModel<const HEADER: bool> {
     forwarding: HashMap<u64, u64>,
     objects: Vec<u64>,
     roots: Vec<u64>,
 }
 
-impl BidirectionalObjectModel {
+impl<const HEADER: bool> BidirectionalObjectModel<HEADER> {
     pub fn new() -> Self {
         BidirectionalObjectModel {
             forwarding: HashMap::new(),
@@ -19,7 +21,7 @@ impl BidirectionalObjectModel {
     }
 }
 
-impl Default for BidirectionalObjectModel {
+impl<const HEADER: bool> Default for BidirectionalObjectModel<HEADER> {
     fn default() -> Self {
         Self::new()
     }
@@ -43,7 +45,19 @@ enum TibType {
     ObjArray = 1,
 }
 
+#[repr(u8)]
+#[derive(Debug)]
+enum StatusByte {
+    Fallback = u8::MAX,
+    NoRef = 0,
+    Ordinary = 1,
+    ObjArray = 2,
+}
+
 impl Tib {
+    const STATUS_BYTE_OFFSET: u8 = 1;
+    const NUMREFS_BYTE_OFFSET: u8 = 2;
+
     fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> Arc<Tib> {
         let mut tibs = TIBS.lock().unwrap();
         tibs.entry(klass).or_insert_with(|| Arc::new(tib()));
@@ -71,7 +85,7 @@ impl Tib {
         }
     }
 
-    unsafe fn scan_object(o: u64, mark_queue: &mut VecDeque<u64>) {
+    unsafe fn scan_object_fallback(o: u64, mark_queue: &mut VecDeque<u64>) {
         let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
@@ -93,9 +107,65 @@ impl Tib {
             }
         }
     }
+
+    unsafe fn scan_object_header(o: u64, mark_queue: &mut VecDeque<u64>) {
+        let header = Header::load(o);
+        let status_byte = header.get_byte(Self::STATUS_BYTE_OFFSET);
+        match status_byte {
+            0 => {
+                // no ref
+            }
+            1 => {
+                let num_refs = header.get_byte(Self::NUMREFS_BYTE_OFFSET);
+                for i in 0..num_refs {
+                    let slot = (o as *mut u64).wrapping_add(2 + i as usize);
+                    mark_queue.push_back(*slot);
+                }
+            }
+            2 => {
+                let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
+                for i in 0..objarray_length {
+                    let slot = (o as *mut u64).wrapping_add(3 + i as usize);
+                    mark_queue.push_back(*slot);
+                }
+            }
+            u8::MAX => Self::scan_object_fallback(o, mark_queue),
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
+    unsafe fn scan_object<const HEADER: bool>(o: u64, mark_queue: &mut VecDeque<u64>) {
+        if HEADER {
+            Self::scan_object_header(o, mark_queue);
+        } else {
+            Self::scan_object_fallback(o, mark_queue);
+        }
+    }
+
+    fn encode_header(&self) -> Header {
+        let mut header = Header::new();
+        match self.ttype {
+            TibType::Ordinary => {
+                if self.num_refs > u8::MAX as u64 {
+                    header.set_byte(StatusByte::Fallback as u8, Self::STATUS_BYTE_OFFSET);
+                } else if self.num_refs == 0 {
+                    header.set_byte(StatusByte::NoRef as u8, Self::STATUS_BYTE_OFFSET);
+                } else {
+                    header.set_byte(StatusByte::Ordinary as u8, Self::STATUS_BYTE_OFFSET);
+                    header.set_byte(self.num_refs as u8, Self::NUMREFS_BYTE_OFFSET);
+                }
+            }
+            TibType::ObjArray => {
+                header.set_byte(StatusByte::ObjArray as u8, Self::STATUS_BYTE_OFFSET);
+            }
+        }
+        header
+    }
 }
 
-impl ObjectModel for BidirectionalObjectModel {
+impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
     fn restore_objects(&mut self, heapdump: &HeapDump) {
         // First pass: calculate forwarding table
         for object in &heapdump.objects {
@@ -139,10 +209,14 @@ impl ObjectModel for BidirectionalObjectModel {
             if !is_objarray {
                 debug_assert_eq!(tib.num_refs, object.edges.len() as u64);
             }
+            let header = tib.encode_header();
             // We need to leak this, so the underlying memory won't be collected
             let tib_ptr = Arc::into_raw(tib);
             let new_start = *self.forwarding.get(&object.start).unwrap();
             unsafe {
+                if HEADER {
+                    header.store(new_start);
+                }
                 std::ptr::write::<u64>((new_start + 8) as *mut u64, tib_ptr as u64);
             }
             // Write out array length for obj array
@@ -173,7 +247,7 @@ impl ObjectModel for BidirectionalObjectModel {
     }
 
     fn scan_object(&mut self, o: u64, mark_queue: &mut VecDeque<u64>) {
-        unsafe { Tib::scan_object(o, mark_queue) }
+        unsafe { Tib::scan_object::<HEADER>(o, mark_queue) }
     }
 
     fn roots(&self) -> &[u64] {
