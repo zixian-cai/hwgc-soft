@@ -11,9 +11,21 @@ use hwgc_soft::*;
 #[cfg(feature = "zsim")]
 use zsim_hooks::*;
 
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    path: String,
+
+    #[arg(short, long, default_value_t = 5)]
+    iteration: usize,
+}
+
 pub fn main() -> Result<()> {
     env_logger::init();
-    let heapdump = HeapDump::from_binpb_zst("heapdump.20.binpb.zst")?;
+    let args = Args::parse();
+    let heapdump = HeapDump::from_binpb_zst(args.path)?;
     heapdump.map_spaces()?;
     let mut objects: HashMap<u64, HeapObject> = HashMap::new();
     for object in &heapdump.objects {
@@ -39,7 +51,7 @@ pub fn main() -> Result<()> {
     #[cfg(feature = "zsim")]
     zsim_roi_begin();
     unsafe {
-        for i in 0..2 {
+        for i in 0..args.iteration {
             mark_sense = (i % 2 == 0) as u8;
             transitive_closure(&heapdump.roots, &objects, mark_sense);
         }
