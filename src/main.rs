@@ -52,7 +52,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, heapdump: HeapDump, iterati
     unsafe {
         for i in 0..iterations {
             mark_sense = (i % 2 == 0) as u8;
-            transitive_closure(&heapdump.roots, mark_sense, &mut object_model);
+            transitive_closure(mark_sense, &mut object_model);
         }
     }
     #[cfg(feature = "m5")]
@@ -61,12 +61,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, heapdump: HeapDump, iterati
     }
     #[cfg(feature = "zsim")]
     zsim_roi_end();
-    for o in &heapdump.objects {
-        let mark_word = o.start as *mut u8;
-        if unsafe { *mark_word } != mark_sense {
-            info!("{} not marked by transitive closure", o.start);
-        }
-    }
+    verify_mark(mark_sense, &mut object_model);
 }
 
 pub fn main() -> Result<()> {

@@ -1,5 +1,4 @@
 use crate::ObjectModel;
-use crate::RootEdge;
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -21,17 +20,13 @@ unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
-pub unsafe fn transitive_closure<O: ObjectModel>(
-    roots: &[RootEdge],
-    mark_sense: u8,
-    object_model: &mut O,
-) {
+pub unsafe fn transitive_closure<O: ObjectModel>(mark_sense: u8, object_model: &mut O) {
     let start: Instant = Instant::now();
     // A queue of objref (possibly null)
     // aka node enqueuing
     let mut mark_queue: VecDeque<u64> = VecDeque::new();
-    for root in roots {
-        mark_queue.push_back(root.objref);
+    for root in object_model.roots() {
+        mark_queue.push_back(*root);
     }
     let mut marked_object: u64 = 0;
     while let Some(o) = mark_queue.pop_front() {
@@ -48,4 +43,13 @@ pub unsafe fn transitive_closure<O: ObjectModel>(
         marked_object,
         elapsed.as_micros() as f64 / 1000f64
     );
+}
+
+pub fn verify_mark<O: ObjectModel>(mark_sense: u8, object_model: &mut O) {
+    for o in object_model.objects() {
+        let mark_word = *o as *const u8;
+        if unsafe { *mark_word } != mark_sense {
+            info!("0x{:x} not marked by transitive closure", o);
+        }
+    }
 }

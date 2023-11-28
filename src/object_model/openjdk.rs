@@ -159,7 +159,9 @@ struct OopMapBlock {
 }
 
 pub struct OpenJDKObjectModel {
-    objects: HashMap<u64, HeapObject>,
+    object_map: HashMap<u64, HeapObject>,
+    objects: Vec<u64>,
+    roots: Vec<u64>,
 }
 
 impl Default for OpenJDKObjectModel {
@@ -172,7 +174,9 @@ impl OpenJDKObjectModel {
     pub fn new() -> Self {
         OpenJDKObjectModel {
             // For debugging
-            objects: HashMap::new(),
+            object_map: HashMap::new(),
+            objects: vec![],
+            roots: vec![],
         }
     }
 }
@@ -180,7 +184,12 @@ impl OpenJDKObjectModel {
 impl ObjectModel for OpenJDKObjectModel {
     fn restore_objects(&mut self, heapdump: &HeapDump) {
         for object in &heapdump.objects {
-            self.objects.insert(object.start, object.clone());
+            self.object_map.insert(object.start, object.clone());
+            self.objects.push(object.start);
+        }
+
+        for root in &heapdump.roots {
+            self.roots.push(root.objref);
         }
 
         for o in &heapdump.objects {
@@ -223,7 +232,15 @@ impl ObjectModel for OpenJDKObjectModel {
 
     fn scan_object(&mut self, o: u64, mark_queue: &mut VecDeque<u64>) {
         unsafe {
-            Tib::scan_object(o, mark_queue, &self.objects);
+            Tib::scan_object(o, mark_queue, &self.object_map);
         }
+    }
+
+    fn roots(&self) -> &[u64] {
+        &self.roots
+    }
+
+    fn objects(&self) -> &[u64] {
+        &self.objects
     }
 }
