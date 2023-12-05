@@ -29,9 +29,17 @@ struct Args {
 
     #[arg(value_enum)]
     object_model: ObjectModelChoice,
+
+    #[arg(short, long, default_value_t = false)]
+    edge_enqueuing: bool,
 }
 
-fn reified_main<O: ObjectModel>(mut object_model: O, heapdump: HeapDump, iterations: usize) {
+fn reified_main<O: ObjectModel>(
+    mut object_model: O,
+    heapdump: HeapDump,
+    iterations: usize,
+    node_enqueuing: bool,
+) {
     let start = Instant::now();
     object_model.restore_objects(&heapdump);
     let elapsed = start.elapsed();
@@ -54,7 +62,18 @@ fn reified_main<O: ObjectModel>(mut object_model: O, heapdump: HeapDump, iterati
     unsafe {
         for i in 0..iterations {
             mark_sense = (i % 2 == 0) as u8;
-            transitive_closure(mark_sense, &mut object_model);
+            let start: Instant = Instant::now();
+            let marked_object = if node_enqueuing {
+                transitive_closure_node(mark_sense, &mut object_model)
+            } else {
+                transitive_closure_edge(mark_sense, &mut object_model)
+            };
+            let elapsed = start.elapsed();
+            info!(
+                "Finished marking {} objects in {} ms",
+                marked_object,
+                elapsed.as_micros() as f64 / 1000f64
+            );
         }
     }
     #[cfg(feature = "m5")]
@@ -73,13 +92,19 @@ pub fn main() -> Result<()> {
     heapdump.map_spaces()?;
     match args.object_model {
         ObjectModelChoice::Openjdk => {
-            reified_main(OpenJDKObjectModel::new(), heapdump, args.iterations);
+            reified_main(
+                OpenJDKObjectModel::new(),
+                heapdump,
+                args.iterations,
+                !args.edge_enqueuing,
+            );
         }
         ObjectModelChoice::Bidirectional => {
             reified_main(
                 BidirectionalObjectModel::<true>::new(),
                 heapdump,
                 args.iterations,
+                !args.edge_enqueuing,
             );
         }
         ObjectModelChoice::BidirectionalFallback => {
@@ -87,6 +112,7 @@ pub fn main() -> Result<()> {
                 BidirectionalObjectModel::<false>::new(),
                 heapdump,
                 args.iterations,
+                !args.edge_enqueuing,
             );
         }
     }

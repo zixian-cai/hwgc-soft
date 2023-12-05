@@ -1,5 +1,5 @@
 use crate::{HeapDump, HeapObject, ObjectModel};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 lazy_static! {
@@ -97,11 +97,10 @@ impl Tib {
         sum
     }
 
-    unsafe fn scan_object(
-        o: u64,
-        mark_queue: &mut VecDeque<u64>,
-        objects: &HashMap<u64, HeapObject>,
-    ) {
+    unsafe fn scan_object<F>(o: u64, mut callback: F, objects: &HashMap<u64, HeapObject>)
+    where
+        F: FnMut(*mut u64),
+    {
         let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
@@ -115,7 +114,7 @@ impl Tib {
                 // println!("Objarray length: {}", objarray_length);
                 for i in 0..objarray_length {
                     let slot = (o as *mut u64).wrapping_add(3 + i as usize);
-                    mark_queue.push_back(*slot);
+                    callback(slot);
                     num_edges += 1;
                 }
             }
@@ -124,14 +123,14 @@ impl Tib {
                     for i in 0..omb.count {
                         let slot = (o as *mut u8).wrapping_add(omb.offset as usize + i as usize * 8)
                             as *mut u64;
-                        mark_queue.push_back(*slot);
+                        callback(slot);
                         num_edges += 1;
                     }
                 }
                 let (start, count) = &tib.instance_mirror_info.unwrap();
                 for i in 0..*count {
                     let slot = ((*start) as *mut u64).wrapping_add(i as usize);
-                    mark_queue.push_back(*slot);
+                    callback(slot);
                     num_edges += 1;
                 }
             }
@@ -140,7 +139,7 @@ impl Tib {
                     for i in 0..omb.count {
                         let slot = (o as *mut u8).wrapping_add(omb.offset as usize + i as usize * 8)
                             as *mut u64;
-                        mark_queue.push_back(*slot);
+                        callback(slot);
                         num_edges += 1;
                     }
                 }
@@ -230,9 +229,12 @@ impl ObjectModel for OpenJDKObjectModel {
         }
     }
 
-    fn scan_object(&mut self, o: u64, mark_queue: &mut VecDeque<u64>) {
+    fn scan_object<F>(&self, o: u64, callback: F)
+    where
+        F: FnMut(*mut u64),
+    {
         unsafe {
-            Tib::scan_object(o, mark_queue, &self.object_map);
+            Tib::scan_object(o, callback, &self.object_map);
         }
     }
 

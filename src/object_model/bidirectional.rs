@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::{HeapDump, HeapObject, ObjectModel};
@@ -85,7 +85,10 @@ impl Tib {
         }
     }
 
-    unsafe fn scan_object_fallback(o: u64, mark_queue: &mut VecDeque<u64>) {
+    unsafe fn scan_object_fallback<F>(o: u64, mut callback: F)
+    where
+        F: FnMut(*mut u64),
+    {
         let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
@@ -96,19 +99,22 @@ impl Tib {
                 let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
                 for i in 0..objarray_length {
                     let slot = (o as *mut u64).wrapping_add(3 + i as usize);
-                    mark_queue.push_back(*slot);
+                    callback(slot);
                 }
             }
             TibType::Ordinary => {
                 for i in 0..tib.num_refs {
                     let slot = (o as *mut u64).wrapping_add(2 + i as usize);
-                    mark_queue.push_back(*slot);
+                    callback(slot);
                 }
             }
         }
     }
 
-    unsafe fn scan_object_header(o: u64, mark_queue: &mut VecDeque<u64>) {
+    unsafe fn scan_object_header<F>(o: u64, mut callback: F)
+    where
+        F: FnMut(*mut u64),
+    {
         let header = Header::load(o);
         let status_byte = header.get_byte(Self::STATUS_BYTE_OFFSET);
         match status_byte {
@@ -119,28 +125,31 @@ impl Tib {
                 let num_refs = header.get_byte(Self::NUMREFS_BYTE_OFFSET);
                 for i in 0..num_refs {
                     let slot = (o as *mut u64).wrapping_add(2 + i as usize);
-                    mark_queue.push_back(*slot);
+                    callback(slot);
                 }
             }
             2 => {
                 let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
                 for i in 0..objarray_length {
                     let slot = (o as *mut u64).wrapping_add(3 + i as usize);
-                    mark_queue.push_back(*slot);
+                    callback(slot);
                 }
             }
-            u8::MAX => Self::scan_object_fallback(o, mark_queue),
+            u8::MAX => Self::scan_object_fallback(o, callback),
             _ => {
                 unreachable!()
             }
         }
     }
 
-    unsafe fn scan_object<const HEADER: bool>(o: u64, mark_queue: &mut VecDeque<u64>) {
+    unsafe fn scan_object<const HEADER: bool, F>(o: u64, callback: F)
+    where
+        F: FnMut(*mut u64),
+    {
         if HEADER {
-            Self::scan_object_header(o, mark_queue);
+            Self::scan_object_header(o, callback);
         } else {
-            Self::scan_object_fallback(o, mark_queue);
+            Self::scan_object_fallback(o, callback);
         }
     }
 
@@ -246,8 +255,11 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
         }
     }
 
-    fn scan_object(&mut self, o: u64, mark_queue: &mut VecDeque<u64>) {
-        unsafe { Tib::scan_object::<HEADER>(o, mark_queue) }
+    fn scan_object<F>(&self, o: u64, callback: F)
+    where
+        F: FnMut(*mut u64),
+    {
+        unsafe { Tib::scan_object::<HEADER, _>(o, callback) }
     }
 
     fn roots(&self) -> &[u64] {
