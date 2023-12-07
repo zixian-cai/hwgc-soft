@@ -1,6 +1,8 @@
+use crate::constants::*;
 use crate::{HeapDump, HeapObject, ObjectModel};
 use std::alloc::{self, Layout};
 use std::collections::HashMap;
+use std::mem::size_of;
 use std::ptr;
 use std::sync::Mutex;
 
@@ -17,6 +19,41 @@ struct Tib {
 }
 
 #[repr(u8)]
+#[derive(Copy, Debug, Clone)]
+enum AlignmentEncodingPattern {
+    Fallback = 7,
+    RefArray = 6,
+    NoRef = 0,
+    Ref0 = 1,
+    Ref1_2_3 = 2,
+    Ref4_5_6 = 3,
+    Ref2 = 4,
+    Ref0_1 = 5,
+}
+
+impl From<AlignmentEncodingPattern> for u8 {
+    fn from(value: AlignmentEncodingPattern) -> Self {
+        value as u8
+    }
+}
+
+impl From<u8> for AlignmentEncodingPattern {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => Self::NoRef,
+            1 => Self::Ref0,
+            2 => Self::Ref1_2_3,
+            3 => Self::Ref4_5_6,
+            4 => Self::Ref2,
+            5 => Self::Ref0_1,
+            6 => Self::RefArray,
+            7 => Self::Fallback,
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[repr(u8)]
 #[derive(Debug)]
 enum TibType {
     Ordinary = 0,
@@ -24,27 +61,86 @@ enum TibType {
     InstanceMirror = 2,
 }
 
-fn alloc_tib(tib: impl FnOnce() -> Tib) -> &'static Tib {
+struct AlignmentEncoding {}
+
+impl AlignmentEncoding {
+    const FIELD_WIDTH: u32 = 3;
+    const MAX_ALIGN_WORDS: u32 = 1 << Self::FIELD_WIDTH;
+    const FIELD_SHIFT: u32 = LOG_BYTES_IN_WORD as u32;
+    // const ALIGNMENT_INCREMENT: u32 = 1 << Self::FIELD_SHIFT;
+    const KLASS_MASK: u32 = (Self::MAX_ALIGN_WORDS - 1) << Self::FIELD_SHIFT;
+    // const ALIGN_CODE_NONE: i32 = -1;
+    // const VERBOSE: bool = false;
+
+    fn get_tib_code_for_region(klass: &Tib) -> AlignmentEncodingPattern {
+        let tib = klass as *const Tib as usize;
+        // println!("binding klass 0x{:x}", klass);
+        let align_code = ((tib & Self::KLASS_MASK as usize) >> Self::FIELD_SHIFT) as u32;
+        debug_assert!(align_code < Self::MAX_ALIGN_WORDS, "Invalid align code");
+        let ret: AlignmentEncodingPattern = (align_code as u8).into();
+        let inverse: u8 = ret.into();
+        debug_assert_eq!(inverse, align_code as u8);
+        ret
+    }
+
+    fn _get_padded_size(size: usize, align_code: Option<u8>) -> usize {
+        let padding: usize = if align_code.is_some() {
+            (Self::MAX_ALIGN_WORDS << Self::FIELD_SHIFT) as usize
+        } else {
+            0
+        };
+        size + padding
+    }
+
+    fn get_padded_word_size(word_size: usize, align_code: Option<u8>) -> usize {
+        let padding: usize = if align_code.is_some() {
+            (Self::MAX_ALIGN_WORDS) as usize
+        } else {
+            0
+        };
+        word_size + padding
+    }
+}
+
+fn alloc_tib(tib: impl FnOnce() -> Tib, align_code: Option<u8>) -> &'static Tib {
     unsafe {
-        let storage = alloc::alloc(Layout::new::<Tib>()) as *mut Tib;
+        let word_size = (size_of::<Tib>() + (BYTES_IN_WORD - 1)) & (!(BYTES_IN_WORD - 1));
+        let padded_word_size = AlignmentEncoding::get_padded_word_size(word_size, align_code);
+        let layout =
+            Layout::from_size_align(padded_word_size * BYTES_IN_WORD, BYTES_IN_WORD).unwrap();
+        let storage = alloc::alloc(layout) as *mut Tib;
+        debug_assert!(layout.size() >= size_of::<Tib>());
         ptr::write(storage, tib());
         storage.as_ref().unwrap()
     }
 }
 
 impl Tib {
-    fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> &'static Tib {
+    fn insert_with_cache(
+        klass: u64,
+        tib: impl FnOnce() -> Tib,
+        encoded_value: Option<u8>,
+    ) -> &'static Tib {
         let mut tibs = TIBS.lock().unwrap();
-        tibs.entry(klass).or_insert_with(|| alloc_tib(tib));
+        tibs.entry(klass)
+            .or_insert_with(|| alloc_tib(tib, encoded_value));
         tibs.get(&klass).unwrap()
     }
 
-    fn objarray(klass: u64) -> &'static Tib {
-        Self::insert_with_cache(klass, || Tib {
-            ttype: TibType::ObjArray,
-            oop_map_blocks: vec![],
-            instance_mirror_info: None,
-        })
+    fn objarray<const AE: bool>(klass: u64) -> &'static Tib {
+        Self::insert_with_cache(
+            klass,
+            || Tib {
+                ttype: TibType::ObjArray,
+                oop_map_blocks: vec![],
+                instance_mirror_info: None,
+            },
+            if AE {
+                Some(AlignmentEncodingPattern::RefArray as u8)
+            } else {
+                None
+            },
+        )
     }
 
     fn encode_oop_map_blocks(obj: &HeapObject) -> Vec<OopMapBlock> {
@@ -76,7 +172,7 @@ impl Tib {
         oop_map_blocks
     }
 
-    fn non_objarray(klass: u64, obj: &HeapObject) -> &'static Tib {
+    fn non_objarray<const AE: bool>(klass: u64, obj: &HeapObject) -> &'static Tib {
         let ombs = Self::encode_oop_map_blocks(obj);
         // println!("{:?}", ombs);
         let sum: u64 = ombs.iter().map(|omb| omb.count).sum();
@@ -85,17 +181,32 @@ impl Tib {
         if let Some(start) = obj.instance_mirror_start {
             let count = obj.instance_mirror_count.unwrap();
             debug_assert_eq!(sum + count, obj.edges.len() as u64);
-            alloc_tib(|| Tib {
-                ttype: TibType::InstanceMirror,
-                oop_map_blocks: ombs,
-                instance_mirror_info: Some((start, count)),
-            })
+            alloc_tib(
+                || Tib {
+                    ttype: TibType::InstanceMirror,
+                    oop_map_blocks: ombs,
+                    instance_mirror_info: Some((start, count)),
+                },
+                if AE {
+                    Some(AlignmentEncodingPattern::Fallback as u8)
+                } else {
+                    None
+                },
+            )
         } else {
-            Self::insert_with_cache(klass, || Tib {
-                ttype: TibType::Ordinary,
-                oop_map_blocks: ombs,
-                instance_mirror_info: None,
-            })
+            Self::insert_with_cache(
+                klass,
+                || Tib {
+                    ttype: TibType::Ordinary,
+                    oop_map_blocks: ombs,
+                    instance_mirror_info: None,
+                },
+                if AE {
+                    Some(AlignmentEncodingPattern::Fallback as u8)
+                } else {
+                    None
+                },
+            )
         }
     }
 
@@ -107,8 +218,11 @@ impl Tib {
         sum
     }
 
-    unsafe fn scan_object<F>(o: u64, mut callback: F, objects: &HashMap<u64, HeapObject>)
-    where
+    unsafe fn scan_object<const AE: bool, F>(
+        o: u64,
+        mut callback: F,
+        objects: &HashMap<u64, HeapObject>,
+    ) where
         F: FnMut(*mut u64),
     {
         let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
@@ -167,19 +281,19 @@ struct OopMapBlock {
     count: u64,
 }
 
-pub struct OpenJDKObjectModel {
+pub struct OpenJDKObjectModel<const AE: bool> {
     object_map: HashMap<u64, HeapObject>,
     objects: Vec<u64>,
     roots: Vec<u64>,
 }
 
-impl Default for OpenJDKObjectModel {
+impl<const AE: bool> Default for OpenJDKObjectModel<AE> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl OpenJDKObjectModel {
+impl<const AE: bool> OpenJDKObjectModel<AE> {
     pub fn new() -> Self {
         OpenJDKObjectModel {
             // For debugging
@@ -190,7 +304,7 @@ impl OpenJDKObjectModel {
     }
 }
 
-impl ObjectModel for OpenJDKObjectModel {
+impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
     fn restore_objects(&mut self, heapdump: &HeapDump) {
         for object in &heapdump.objects {
             self.object_map.insert(object.start, object.clone());
@@ -206,9 +320,9 @@ impl ObjectModel for OpenJDKObjectModel {
             //     std::ptr::write::<u64>((o.start + 8) as *mut u64, o.start);
             // }
             let tib = if o.objarray_length.is_some() {
-                Tib::objarray(o.klass)
+                Tib::objarray::<AE>(o.klass)
             } else {
-                Tib::non_objarray(o.klass, o)
+                Tib::non_objarray::<AE>(o.klass, o)
             };
             if o.objarray_length.is_none() {
                 debug_assert_eq!(tib.num_edges(), o.edges.len() as u64);
@@ -243,7 +357,7 @@ impl ObjectModel for OpenJDKObjectModel {
         F: FnMut(*mut u64),
     {
         unsafe {
-            Tib::scan_object(o, callback, &self.object_map);
+            Tib::scan_object::<AE, _>(o, callback, &self.object_map);
         }
     }
 

@@ -4,6 +4,8 @@ extern crate lazy_static;
 #[macro_use]
 extern crate log;
 
+#[allow(dead_code)]
+mod constants;
 mod heapdump;
 #[cfg(feature = "m5")]
 pub mod m5;

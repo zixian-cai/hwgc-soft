@@ -15,6 +15,7 @@ use clap::{Parser, ValueEnum};
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
 enum ObjectModelChoice {
     Openjdk,
+    OpenjdkAe,
     Bidirectional,
     BidirectionalFallback,
 }
@@ -93,7 +94,15 @@ pub fn main() -> Result<()> {
     match args.object_model {
         ObjectModelChoice::Openjdk => {
             reified_main(
-                OpenJDKObjectModel::new(),
+                OpenJDKObjectModel::<false>::new(),
+                heapdump,
+                args.iterations,
+                !args.edge_enqueuing,
+            );
+        }
+        ObjectModelChoice::OpenjdkAe => {
+            reified_main(
+                OpenJDKObjectModel::<true>::new(),
                 heapdump,
                 args.iterations,
                 !args.edge_enqueuing,

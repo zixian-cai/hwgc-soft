@@ -1,7 +1,7 @@
 use std::alloc::{self, Layout};
 use std::collections::HashMap;
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use crate::{HeapDump, HeapObject, ObjectModel};
 
