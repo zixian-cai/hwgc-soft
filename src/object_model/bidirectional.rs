@@ -1,4 +1,6 @@
+use std::alloc::{self, Layout};
 use std::collections::HashMap;
+use std::ptr;
 use std::sync::{Arc, Mutex};
 
 use crate::{HeapDump, HeapObject, ObjectModel};
@@ -27,8 +29,16 @@ impl<const HEADER: bool> Default for BidirectionalObjectModel<HEADER> {
     }
 }
 
+fn alloc_tib(tib: impl FnOnce() -> Tib) -> &'static Tib {
+    unsafe {
+        let storage = alloc::alloc(Layout::new::<Tib>()) as *mut Tib;
+        ptr::write(storage, tib());
+        storage.as_ref().unwrap()
+    }
+}
+
 lazy_static! {
-    static ref TIBS: Mutex<HashMap<u64, Arc<Tib>>> = Mutex::new(HashMap::new());
+    static ref TIBS: Mutex<HashMap<u64, &'static Tib>> = Mutex::new(HashMap::new());
 }
 
 #[repr(C)]
@@ -58,22 +68,22 @@ impl Tib {
     const STATUS_BYTE_OFFSET: u8 = 1;
     const NUMREFS_BYTE_OFFSET: u8 = 2;
 
-    fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> Arc<Tib> {
+    fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> &'static Tib {
         let mut tibs = TIBS.lock().unwrap();
-        tibs.entry(klass).or_insert_with(|| Arc::new(tib()));
-        tibs.get(&klass).unwrap().clone()
+        tibs.entry(klass).or_insert_with(|| alloc_tib(tib));
+        tibs.get(&klass).unwrap()
     }
 
-    fn objarray(klass: u64) -> Arc<Tib> {
+    fn objarray(klass: u64) -> &'static Tib {
         Self::insert_with_cache(klass, || Tib {
             ttype: TibType::ObjArray,
             num_refs: 0,
         })
     }
 
-    fn non_objarray(klass: u64, obj: &HeapObject) -> Arc<Tib> {
+    fn non_objarray(klass: u64, obj: &HeapObject) -> &'static Tib {
         if obj.instance_mirror_start.is_some() {
-            Arc::new(Tib {
+            alloc_tib(|| Tib {
                 ttype: TibType::Ordinary,
                 num_refs: obj.edges.len() as u64,
             })
@@ -220,7 +230,7 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
             }
             let header = tib.encode_header();
             // We need to leak this, so the underlying memory won't be collected
-            let tib_ptr = Arc::into_raw(tib);
+            let tib_ptr = tib as *const Tib;
             let new_start = *self.forwarding.get(&object.start).unwrap();
             unsafe {
                 if HEADER {

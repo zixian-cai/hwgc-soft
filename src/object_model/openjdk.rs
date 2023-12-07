@@ -1,9 +1,11 @@
 use crate::{HeapDump, HeapObject, ObjectModel};
+use std::alloc::{self, Layout};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::ptr;
+use std::sync::Mutex;
 
 lazy_static! {
-    static ref TIBS: Mutex<HashMap<u64, Arc<Tib>>> = Mutex::new(HashMap::new());
+    static ref TIBS: Mutex<HashMap<u64, &'static Tib>> = Mutex::new(HashMap::new());
 }
 
 #[repr(C)]
@@ -22,14 +24,22 @@ enum TibType {
     InstanceMirror = 2,
 }
 
+fn alloc_tib(tib: impl FnOnce() -> Tib) -> &'static Tib {
+    unsafe {
+        let storage = alloc::alloc(Layout::new::<Tib>()) as *mut Tib;
+        ptr::write(storage, tib());
+        storage.as_ref().unwrap()
+    }
+}
+
 impl Tib {
-    fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> Arc<Tib> {
+    fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> &'static Tib {
         let mut tibs = TIBS.lock().unwrap();
-        tibs.entry(klass).or_insert_with(|| Arc::new(tib()));
-        tibs.get(&klass).unwrap().clone()
+        tibs.entry(klass).or_insert_with(|| alloc_tib(tib));
+        tibs.get(&klass).unwrap()
     }
 
-    fn objarray(klass: u64) -> Arc<Tib> {
+    fn objarray(klass: u64) -> &'static Tib {
         Self::insert_with_cache(klass, || Tib {
             ttype: TibType::ObjArray,
             oop_map_blocks: vec![],
@@ -66,7 +76,7 @@ impl Tib {
         oop_map_blocks
     }
 
-    fn non_objarray(klass: u64, obj: &HeapObject) -> Arc<Tib> {
+    fn non_objarray(klass: u64, obj: &HeapObject) -> &'static Tib {
         let ombs = Self::encode_oop_map_blocks(obj);
         // println!("{:?}", ombs);
         let sum: u64 = ombs.iter().map(|omb| omb.count).sum();
@@ -75,7 +85,7 @@ impl Tib {
         if let Some(start) = obj.instance_mirror_start {
             let count = obj.instance_mirror_count.unwrap();
             debug_assert_eq!(sum + count, obj.edges.len() as u64);
-            Arc::new(Tib {
+            alloc_tib(|| Tib {
                 ttype: TibType::InstanceMirror,
                 oop_map_blocks: ombs,
                 instance_mirror_info: Some((start, count)),
@@ -203,8 +213,7 @@ impl ObjectModel for OpenJDKObjectModel {
             if o.objarray_length.is_none() {
                 debug_assert_eq!(tib.num_edges(), o.edges.len() as u64);
             }
-            // We need to leak this, so the underlying memory won't be collected
-            let tib_ptr = Arc::into_raw(tib);
+            let tib_ptr = tib as *const Tib;
             // println!(
             //     "Object: 0x{:x}, Klass: 0x{:x}, TIB: {:?}, TIB ptr: 0x{:x}",
             //     o.start, o.klass, tib , tib_ptr as u64
