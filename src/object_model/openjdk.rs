@@ -1,5 +1,6 @@
 use crate::constants::*;
 use crate::{HeapDump, HeapObject, ObjectModel};
+use fixedbitset::FixedBitSet;
 use std::alloc::{self, Layout};
 use std::collections::HashMap;
 use std::mem::size_of;
@@ -187,6 +188,31 @@ impl Tib {
         oop_map_blocks
     }
 
+    fn alignment_encode_omb(ombs: &[OopMapBlock]) -> AlignmentEncodingPattern {
+        let mut fields = FixedBitSet::with_capacity(7);
+        for omb in ombs {
+            let first_field = (omb.offset >> LOG_BYTES_IN_WORD) - 2;
+            let last_field = first_field + omb.count - 1;
+            if first_field > 6 || last_field > 6 {
+                return AlignmentEncodingPattern::Fallback;
+            }
+            fields.set_range(
+                (first_field as usize)..((first_field + omb.count) as usize),
+                true,
+            );
+        }
+        let bits = fields.as_slice()[0];
+        match bits {
+            0b0000000 => AlignmentEncodingPattern::NoRef,
+            0b0000001 => AlignmentEncodingPattern::Ref0,
+            0b0000011 => AlignmentEncodingPattern::Ref0_1,
+            0b0000100 => AlignmentEncodingPattern::Ref2,
+            0b0001110 => AlignmentEncodingPattern::Ref1_2_3,
+            0b1110000 => AlignmentEncodingPattern::Ref4_5_6,
+            _ => AlignmentEncodingPattern::Fallback,
+        }
+    }
+
     fn non_objarray<const AE: bool>(klass: u64, obj: &HeapObject) -> &'static Tib {
         let ombs = Self::encode_oop_map_blocks(obj);
         // println!("{:?}", ombs);
@@ -196,19 +222,25 @@ impl Tib {
         if let Some(start) = obj.instance_mirror_start {
             let count = obj.instance_mirror_count.unwrap();
             debug_assert_eq!(sum + count, obj.edges.len() as u64);
+            let align_code = if AE {
+                Some(Self::alignment_encode_omb(&ombs) as u8)
+            } else {
+                None
+            };
             alloc_tib(
                 || Tib {
                     ttype: TibType::InstanceMirror,
                     oop_map_blocks: ombs,
                     instance_mirror_info: Some((start, count)),
                 },
-                if AE {
-                    Some(AlignmentEncodingPattern::Fallback as u8)
-                } else {
-                    None
-                },
+                align_code,
             )
         } else {
+            let align_code = if AE {
+                Some(Self::alignment_encode_omb(&ombs) as u8)
+            } else {
+                None
+            };
             Self::insert_with_cache(
                 klass,
                 || Tib {
@@ -216,11 +248,7 @@ impl Tib {
                     oop_map_blocks: ombs,
                     instance_mirror_info: None,
                 },
-                if AE {
-                    Some(AlignmentEncodingPattern::Fallback as u8)
-                } else {
-                    None
-                },
+                align_code,
             )
         }
     }
@@ -295,14 +323,15 @@ impl Tib {
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
         }
-        let tib: &Tib = &*tib_ptr;
         if !AE {
+            let tib: &Tib = &*tib_ptr;
             Self::scan_object_fallback(tib, o, callback, objects);
             return;
         }
-        let pattern = AlignmentEncoding::get_tib_code_for_region(tib as *const Tib as usize);
+        let pattern = AlignmentEncoding::get_tib_code_for_region(tib_ptr as usize);
         match pattern {
             AlignmentEncodingPattern::Fallback => {
+                let tib: &Tib = &*tib_ptr;
                 Self::scan_object_fallback(tib, o, callback, objects);
             }
             AlignmentEncodingPattern::RefArray => {
