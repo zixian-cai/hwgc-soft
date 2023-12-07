@@ -67,13 +67,11 @@ impl AlignmentEncoding {
     const FIELD_WIDTH: u32 = 3;
     const MAX_ALIGN_WORDS: u32 = 1 << Self::FIELD_WIDTH;
     const FIELD_SHIFT: u32 = LOG_BYTES_IN_WORD as u32;
-    // const ALIGNMENT_INCREMENT: u32 = 1 << Self::FIELD_SHIFT;
+    const ALIGNMENT_INCREMENT: u32 = 1 << Self::FIELD_SHIFT;
     const KLASS_MASK: u32 = (Self::MAX_ALIGN_WORDS - 1) << Self::FIELD_SHIFT;
-    // const ALIGN_CODE_NONE: i32 = -1;
-    // const VERBOSE: bool = false;
+    const VERBOSE: bool = false;
 
-    fn get_tib_code_for_region(klass: &Tib) -> AlignmentEncodingPattern {
-        let tib = klass as *const Tib as usize;
+    fn get_tib_code_for_region(tib: usize) -> AlignmentEncodingPattern {
         // println!("binding klass 0x{:x}", klass);
         let align_code = ((tib & Self::KLASS_MASK as usize) >> Self::FIELD_SHIFT) as u32;
         debug_assert!(align_code < Self::MAX_ALIGN_WORDS, "Invalid align code");
@@ -109,7 +107,24 @@ fn alloc_tib(tib: impl FnOnce() -> Tib, align_code: Option<u8>) -> &'static Tib 
         let layout =
             Layout::from_size_align(padded_word_size * BYTES_IN_WORD, BYTES_IN_WORD).unwrap();
         let storage = alloc::alloc(layout) as *mut Tib;
+        let mut region = storage as usize;
+        let limit = region + padded_word_size * BYTES_IN_WORD;
+        if let Some(a) = align_code {
+            while AlignmentEncoding::get_tib_code_for_region(region) as u8 != a {
+                region += AlignmentEncoding::ALIGNMENT_INCREMENT as usize;
+                debug_assert!(region <= limit);
+            }
+        }
+        if AlignmentEncoding::VERBOSE {
+            eprintln!(
+                "Tib: region = 0x{:x}, tib code = {}, requested = {:?}",
+                region,
+                AlignmentEncoding::get_tib_code_for_region(region) as u8,
+                align_code
+            );
+        }
         debug_assert!(layout.size() >= size_of::<Tib>());
+        let storage = region as *mut Tib;
         ptr::write(storage, tib());
         storage.as_ref().unwrap()
     }
@@ -218,18 +233,14 @@ impl Tib {
         sum
     }
 
-    unsafe fn scan_object<const AE: bool, F>(
+    unsafe fn scan_object_fallback<F>(
+        tib: &Tib,
         o: u64,
         mut callback: F,
         objects: &HashMap<u64, HeapObject>,
     ) where
         F: FnMut(*mut u64),
     {
-        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
-        if tib_ptr.is_null() {
-            panic!("Object 0x{:x} has a null tib pointer", { o });
-        }
-        let tib: &Tib = &*tib_ptr;
         // println!("Object: {}, Tib Ptr: {:?}, Tib: {:?}", o, tib_ptr, tib);
         let mut num_edges = 0;
         match tib.ttype {
@@ -270,7 +281,59 @@ impl Tib {
             }
         }
         // println!("{:?}", objects.get(&o).unwrap());
-        debug_assert_eq!(num_edges, objects.get(&o).unwrap().edges.len())
+        debug_assert_eq!(num_edges, objects.get(&o).unwrap().edges.len());
+    }
+
+    unsafe fn scan_object<const AE: bool, F>(
+        o: u64,
+        mut callback: F,
+        objects: &HashMap<u64, HeapObject>,
+    ) where
+        F: FnMut(*mut u64),
+    {
+        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        if tib_ptr.is_null() {
+            panic!("Object 0x{:x} has a null tib pointer", { o });
+        }
+        let tib: &Tib = &*tib_ptr;
+        if !AE {
+            Self::scan_object_fallback(tib, o, callback, objects);
+            return;
+        }
+        let pattern = AlignmentEncoding::get_tib_code_for_region(tib as *const Tib as usize);
+        match pattern {
+            AlignmentEncodingPattern::Fallback => {
+                Self::scan_object_fallback(tib, o, callback, objects);
+            }
+            AlignmentEncodingPattern::RefArray => {
+                let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
+                for i in 0..objarray_length {
+                    let slot = (o as *mut u64).wrapping_add(3 + i as usize);
+                    callback(slot);
+                }
+            }
+            AlignmentEncodingPattern::NoRef => {}
+            AlignmentEncodingPattern::Ref0 => {
+                callback((o as *mut u64).wrapping_add(2));
+            }
+            AlignmentEncodingPattern::Ref1_2_3 => {
+                callback((o as *mut u64).wrapping_add(3));
+                callback((o as *mut u64).wrapping_add(4));
+                callback((o as *mut u64).wrapping_add(5));
+            }
+            AlignmentEncodingPattern::Ref4_5_6 => {
+                callback((o as *mut u64).wrapping_add(6));
+                callback((o as *mut u64).wrapping_add(7));
+                callback((o as *mut u64).wrapping_add(8));
+            }
+            AlignmentEncodingPattern::Ref2 => {
+                callback((o as *mut u64).wrapping_add(4));
+            }
+            AlignmentEncodingPattern::Ref0_1 => {
+                callback((o as *mut u64).wrapping_add(2));
+                callback((o as *mut u64).wrapping_add(3));
+            }
+        }
     }
 }
 
