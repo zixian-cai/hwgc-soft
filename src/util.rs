@@ -18,6 +18,11 @@ fn mmap_fixed(start: u64, size: usize, prot: libc::c_int, flags: libc::c_int) ->
     Ok(())
 }
 
+pub fn munmap(start: u64, size: usize) -> Result<()> {
+    let ptr = start as *mut libc::c_void;
+    wrap_libc_call(&|| unsafe { libc::munmap(ptr, size) }, 0)
+}
+
 pub fn dzmmap_noreplace(start: u64, size: usize) -> Result<()> {
     let prot = libc::PROT_READ | libc::PROT_WRITE | libc::PROT_EXEC;
     let flags =

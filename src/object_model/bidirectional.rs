@@ -185,6 +185,26 @@ impl Tib {
 }
 
 impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
+    fn reset(&mut self) {
+        self.objects.clear();
+        self.forwarding.clear();
+        self.roots.clear();
+    }
+
+    fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize {
+        let before_size = TIBS.lock().unwrap().len();
+        for object in &heapdump.objects {
+            let is_objarray = object.objarray_length.is_some();
+            if is_objarray {
+                let _tib = Tib::objarray(object.klass);
+            } else if object.instance_mirror_start.is_none() {
+                let _tib = Tib::non_objarray(object.klass, object);
+            };
+        }
+        let after_size = TIBS.lock().unwrap().len();
+        after_size - before_size
+    }
+
     fn restore_objects(&mut self, heapdump: &HeapDump) {
         // First pass: calculate forwarding table
         for object in &heapdump.objects {

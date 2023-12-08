@@ -397,6 +397,26 @@ impl<const AE: bool> OpenJDKObjectModel<AE> {
 }
 
 impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
+    fn reset(&mut self) {
+        self.object_map.clear();
+        self.roots.clear();
+        self.objects.clear();
+    }
+
+    fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize {
+        let before_size = TIBS.lock().unwrap().len();
+        for object in &heapdump.objects {
+            let is_objarray = object.objarray_length.is_some();
+            if is_objarray {
+                let _tib = Tib::objarray::<AE>(object.klass);
+            } else if object.instance_mirror_start.is_none() {
+                let _tib = Tib::non_objarray::<AE>(object.klass, object);
+            };
+        }
+        let after_size = TIBS.lock().unwrap().len();
+        after_size - before_size
+    }
+
     fn restore_objects(&mut self, heapdump: &HeapDump) {
         for object in &heapdump.objects {
             self.object_map.insert(object.start, object.clone());

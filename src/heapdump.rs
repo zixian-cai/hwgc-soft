@@ -9,7 +9,7 @@ use std::path::Path;
 
 pub use generated_src::*;
 
-use super::util::dzmmap_noreplace;
+use super::util::{dzmmap_noreplace, munmap};
 
 impl HeapDump {
     pub fn from_binpb_zst(p: impl AsRef<Path>) -> Result<HeapDump> {
@@ -22,8 +22,16 @@ impl HeapDump {
 
     pub fn map_spaces(&self) -> Result<()> {
         for s in &self.spaces {
-            info!("Mapping {} at 0x{:x}", s.name, s.start);
+            debug!("Mapping {} at 0x{:x}", s.name, s.start);
             dzmmap_noreplace(s.start, (s.end - s.start) as usize)?;
+        }
+        Ok(())
+    }
+
+    pub fn unmap_spaces(&self) -> Result<()> {
+        for s in &self.spaces {
+            debug!("Unmapping {} at 0x{:x}", s.name, s.start);
+            munmap(s.start, (s.end - s.start) as usize)?;
         }
         Ok(())
     }

@@ -12,5 +12,6 @@ fn main() -> Result<()> {
             Path::new(&root).join("vendor/m5").to_str().unwrap()
         );
     }
+    built::write_built_file().expect("Failed to acquire build-time information");
     Ok(())
 }

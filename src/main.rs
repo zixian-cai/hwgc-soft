@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate log;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -23,107 +23,132 @@ enum ObjectModelChoice {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    path: String,
+    #[arg(required = true)]
+    paths: Vec<String>,
 
     #[arg(short, long, default_value_t = 5)]
     iterations: usize,
 
-    #[arg(value_enum)]
+    #[arg(short, long, value_enum)]
     object_model: ObjectModelChoice,
 
     #[arg(short, long, default_value_t = false)]
     edge_enqueuing: bool,
 }
 
-fn reified_main<O: ObjectModel>(
-    mut object_model: O,
-    heapdump: HeapDump,
-    iterations: usize,
-    node_enqueuing: bool,
-) {
-    let start = Instant::now();
-    object_model.restore_objects(&heapdump);
-    let elapsed = start.elapsed();
-    info!(
-        "Finish deserializing the heapdump, {} objects in {} ms",
-        heapdump.objects.len(),
-        elapsed.as_micros() as f64 / 1000f64
-    );
-    info!(
-        "Sanity trace reporting {} reachable objects",
-        sanity_trace(&heapdump)
-    );
-    let mut mark_sense: u8 = 0;
-    #[cfg(feature = "m5")]
-    unsafe {
-        m5::m5_reset_stats(0, 0);
+fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+    for path in &args.paths {
+        let start = Instant::now();
+        let heapdump = HeapDump::from_binpb_zst(path)?;
+        let tibs_cached = object_model.restore_tibs(&heapdump);
+        let elapsed = start.elapsed();
+        info!(
+            "{} extra TIBs cached from processing {} in {} ms",
+            tibs_cached,
+            path,
+            elapsed.as_millis()
+        );
     }
-    #[cfg(feature = "zsim")]
-    zsim_roi_begin();
-    unsafe {
-        for i in 0..iterations {
-            mark_sense = (i % 2 == 0) as u8;
-            let start: Instant = Instant::now();
-            let marked_object = if node_enqueuing {
-                transitive_closure_node(mark_sense, &mut object_model)
-            } else {
-                transitive_closure_edge(mark_sense, &mut object_model)
-            };
-            let elapsed = start.elapsed();
+
+    let mut time = 0;
+    let mut pauses = 0;
+
+    for path in &args.paths {
+        // reset object model internal states
+        object_model.reset();
+        let heapdump = HeapDump::from_binpb_zst(path)?;
+        // mmap
+        heapdump.map_spaces()?;
+        // write objects to the heap
+        let start = Instant::now();
+        object_model.restore_objects(&heapdump);
+        let elapsed = start.elapsed();
+        info!(
+            "Finish deserializing the heapdump, {} objects in {} ms",
+            heapdump.objects.len(),
+            elapsed.as_micros() as f64 / 1000f64
+        );
+        if cfg!(debug_assertions) {
+            let sanity_traced_objects = sanity_trace(&heapdump);
             info!(
-                "Finished marking {} objects in {} ms",
-                marked_object,
+                "Sanity trace reporting {} reachable objects",
+                sanity_traced_objects
+            );
+            assert_eq!(sanity_traced_objects, heapdump.objects.len());
+        }
+        let mut mark_sense: u8 = 0;
+        #[cfg(feature = "m5")]
+        unsafe {
+            m5::m5_reset_stats(0, 0);
+        }
+        #[cfg(feature = "zsim")]
+        zsim_roi_begin();
+        unsafe {
+            let mut elapsed = Duration::ZERO;
+            for i in 0..args.iterations {
+                mark_sense = (i % 2 == 0) as u8;
+                let start: Instant = Instant::now();
+                let marked_objects = if args.edge_enqueuing {
+                    transitive_closure_edge(mark_sense, &mut object_model)
+                } else {
+                    transitive_closure_node(mark_sense, &mut object_model)
+                };
+                elapsed = start.elapsed();
+                debug!(
+                    "Finished marking {} objects in {} ms",
+                    marked_objects,
+                    elapsed.as_micros() as f64 / 1000f64
+                );
+                debug_assert_eq!(marked_objects as usize, heapdump.objects.len());
+            }
+            pauses += 1;
+            time += elapsed.as_micros();
+            info!(
+                "Final iteration {} ms",
                 elapsed.as_micros() as f64 / 1000f64
             );
         }
+        #[cfg(feature = "m5")]
+        unsafe {
+            m5::m5_dump_reset_stats(0, 0);
+        }
+        #[cfg(feature = "zsim")]
+        zsim_roi_end();
+        verify_mark(mark_sense, &mut object_model);
+        heapdump.unmap_spaces()?;
     }
-    #[cfg(feature = "m5")]
-    unsafe {
-        m5::m5_dump_reset_stats(0, 0);
+
+    println!("============================ Tabulate Statistics ============================");
+    println!("pauses\ttime");
+    println!("{}\t{}", pauses, time);
+    println!("-------------------------- End Tabulate Statistics --------------------------");
+    Ok(())
+}
+
+fn get_git_info() -> String {
+    match (built_info::GIT_COMMIT_HASH, built_info::GIT_DIRTY) {
+        (Some(hash), Some(dirty)) => format!(
+            "{}{}",
+            hash.split_at(7).0,
+            if dirty { "-dirty" } else { "" }
+        ),
+        (Some(hash), None) => format!("{}{}", hash.split_at(7).0, "-?"),
+        _ => "unknown-git-version".to_string(),
     }
-    #[cfg(feature = "zsim")]
-    zsim_roi_end();
-    verify_mark(mark_sense, &mut object_model);
 }
 
 pub fn main() -> Result<()> {
     env_logger::init();
+    println!("hwgc_soft {}", get_git_info());
     let args = Args::parse();
-    let heapdump = HeapDump::from_binpb_zst(args.path)?;
-    heapdump.map_spaces()?;
     match args.object_model {
-        ObjectModelChoice::Openjdk => {
-            reified_main(
-                OpenJDKObjectModel::<false>::new(),
-                heapdump,
-                args.iterations,
-                !args.edge_enqueuing,
-            );
-        }
-        ObjectModelChoice::OpenjdkAe => {
-            reified_main(
-                OpenJDKObjectModel::<true>::new(),
-                heapdump,
-                args.iterations,
-                !args.edge_enqueuing,
-            );
-        }
+        ObjectModelChoice::Openjdk => reified_main(OpenJDKObjectModel::<false>::new(), args),
+        ObjectModelChoice::OpenjdkAe => reified_main(OpenJDKObjectModel::<true>::new(), args),
         ObjectModelChoice::Bidirectional => {
-            reified_main(
-                BidirectionalObjectModel::<true>::new(),
-                heapdump,
-                args.iterations,
-                !args.edge_enqueuing,
-            );
+            reified_main(BidirectionalObjectModel::<true>::new(), args)
         }
         ObjectModelChoice::BidirectionalFallback => {
-            reified_main(
-                BidirectionalObjectModel::<false>::new(),
-                heapdump,
-                args.iterations,
-                !args.edge_enqueuing,
-            );
+            reified_main(BidirectionalObjectModel::<false>::new(), args)
         }
     }
-    Ok(())
 }
