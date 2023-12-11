@@ -13,9 +13,10 @@ use zsim_hooks::*;
 use clap::{Parser, ValueEnum};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all="verbatim")]
 enum ObjectModelChoice {
-    Openjdk,
-    OpenjdkAe,
+    OpenJDK,
+    OpenJDKAE,
     Bidirectional,
     BidirectionalFallback,
 }
@@ -137,8 +138,8 @@ pub fn main() -> Result<()> {
     println!("hwgc_soft {}", get_git_info());
     let args = Args::parse();
     match args.object_model {
-        ObjectModelChoice::Openjdk => reified_main(OpenJDKObjectModel::<false>::new(), args),
-        ObjectModelChoice::OpenjdkAe => reified_main(OpenJDKObjectModel::<true>::new(), args),
+        ObjectModelChoice::OpenJDK => reified_main(OpenJDKObjectModel::<false>::new(), args),
+        ObjectModelChoice::OpenJDKAE => reified_main(OpenJDKObjectModel::<true>::new(), args),
         ObjectModelChoice::Bidirectional => {
             reified_main(BidirectionalObjectModel::<true>::new(), args)
         }

@@ -6,6 +6,7 @@ use crate::ObjectModel;
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all="verbatim")]
 pub enum TracingLoopChoice {
     EdgeSlot,
     EdgeObjref,

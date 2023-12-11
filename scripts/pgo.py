@@ -98,12 +98,12 @@ def main():
         heapdumps: List[str]
         heapdumps = args.heapdumps
         object_models = [
-            "openjdk",
-            "openjdk-ae",
-            "bidirectional",
-            "bidirectional-fallback",
+            "OpenJDK",
+            "OpenJDKAE",
+            "Bidirectional",
+            "BidirectionalFallback",
         ]
-        tracing_loops = ["edge-slot", "edge-objref"]
+        tracing_loops = ["EdgeSlot", "EdgeObjref"]
 
         ITERATIONS = "25"
 
@@ -120,26 +120,26 @@ def main():
         # Two object models
         for tracing_loop in tracing_loops:
             inputs = [
-                ["-i", ITERATIONS, "-o", "openjdk", "-t", tracing_loop] + heapdumps,
-                ["-i", ITERATIONS, "-o", "openjdk-ae", "-t", tracing_loop] + heapdumps,
+                ["-i", ITERATIONS, "-o", "OpenJDK", "-t", tracing_loop] + heapdumps,
+                ["-i", ITERATIONS, "-o", "OpenJDKAE", "-t", tracing_loop] + heapdumps,
             ]
-            profile_name = f"openjdk_both_{tracing_loop}".replace("-", "_")
+            profile_name = f"OpenJDK_both_{tracing_loop}".replace("-", "_")
             build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
         for tracing_loop in tracing_loops:
             inputs = [
-                ["-i", ITERATIONS, "-o", "bidirectional", "-t", tracing_loop]
+                ["-i", ITERATIONS, "-o", "Bidirectional", "-t", tracing_loop]
                 + heapdumps,
-                ["-i", ITERATIONS, "-o", "bidirectional-fallback", "-t", tracing_loop]
+                ["-i", ITERATIONS, "-o", "BidirectionalFallback", "-t", tracing_loop]
                 + heapdumps,
             ]
-            profile_name = f"bidirectional_both_{tracing_loop}".replace("-", "_")
+            profile_name = f"Bidirectional_both_{tracing_loop}".replace("-", "_")
             build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
 
         # Two tracing loops
         for object_model in object_models:
             inputs = [
-                ["-i", ITERATIONS, "-o", object_model, "-t", "edge-objref"] + heapdumps,
-                ["-i", ITERATIONS, "-o", object_model, "-t", "edge-slot"] + heapdumps,
+                ["-i", ITERATIONS, "-o", object_model, "-t", "EdgeObjref"] + heapdumps,
+                ["-i", ITERATIONS, "-o", object_model, "-t", "EdgeSlot"] + heapdumps,
             ]
             profile_name = f"{object_model}_edge_both".replace("-", "_")
             build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
