@@ -32,8 +32,8 @@ struct Args {
     #[arg(short, long, value_enum)]
     object_model: ObjectModelChoice,
 
-    #[arg(short, long, default_value_t = false)]
-    edge_enqueuing: bool,
+    #[arg(short, long, value_enum)]
+    tracing_loop: TracingLoopChoice,
 }
 
 fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
@@ -83,31 +83,26 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
         }
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
-        unsafe {
-            let mut elapsed = Duration::ZERO;
-            for i in 0..args.iterations {
-                mark_sense = (i % 2 == 0) as u8;
-                let start: Instant = Instant::now();
-                let marked_objects = if args.edge_enqueuing {
-                    transitive_closure_edge(mark_sense, &mut object_model)
-                } else {
-                    transitive_closure_node(mark_sense, &mut object_model)
-                };
-                elapsed = start.elapsed();
-                debug!(
-                    "Finished marking {} objects in {} ms",
-                    marked_objects,
-                    elapsed.as_micros() as f64 / 1000f64
-                );
-                debug_assert_eq!(marked_objects as usize, heapdump.objects.len());
-            }
-            pauses += 1;
-            time += elapsed.as_micros();
-            info!(
-                "Final iteration {} ms",
+        let mut elapsed = Duration::ZERO;
+        for i in 0..args.iterations {
+            mark_sense = (i % 2 == 0) as u8;
+            let start: Instant = Instant::now();
+            let marked_objects =
+                transitive_closure(args.tracing_loop, mark_sense, &mut object_model);
+            elapsed = start.elapsed();
+            debug!(
+                "Finished marking {} objects in {} ms",
+                marked_objects,
                 elapsed.as_micros() as f64 / 1000f64
             );
+            debug_assert_eq!(marked_objects as usize, heapdump.objects.len());
         }
+        pauses += 1;
+        time += elapsed.as_micros();
+        info!(
+            "Final iteration {} ms",
+            elapsed.as_micros() as f64 / 1000f64
+        );
         #[cfg(feature = "m5")]
         unsafe {
             m5::m5_dump_reset_stats(0, 0);

@@ -19,6 +19,6 @@ pub mod built_info {
 }
 
 pub use crate::heapdump::{HeapDump, HeapObject, RootEdge};
-pub use crate::mark::{transitive_closure_edge, transitive_closure_node, verify_mark};
+pub use crate::mark::{transitive_closure, verify_mark, TracingLoopChoice};
 pub use crate::object_model::{BidirectionalObjectModel, ObjectModel, OpenJDKObjectModel};
 pub use crate::sanity::sanity_trace;

@@ -1,7 +1,15 @@
+use clap::ValueEnum;
+
 use crate::object_model::Header;
 use crate::ObjectModel;
 
 use std::collections::VecDeque;
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+pub enum TracingLoopChoice {
+    EdgeSlot,
+    EdgeObjref,
+}
 
 unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     // mark sense is 1 intially, and flip every epoch
@@ -19,7 +27,25 @@ unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
-pub unsafe fn transitive_closure_node<O: ObjectModel>(mark_sense: u8, object_model: &mut O) -> u64 {
+pub fn transitive_closure<O: ObjectModel>(
+    l: TracingLoopChoice,
+    mark_sense: u8,
+    object_model: &mut O,
+) -> u64 {
+    unsafe {
+        match l {
+            TracingLoopChoice::EdgeObjref => {
+                transitive_closure_edge_objref(mark_sense, object_model)
+            }
+            TracingLoopChoice::EdgeSlot => transitive_closure_edge_slot(mark_sense, object_model),
+        }
+    }
+}
+
+unsafe fn transitive_closure_edge_objref<O: ObjectModel>(
+    mark_sense: u8,
+    object_model: &mut O,
+) -> u64 {
     // Edge-ObjRef enqueuing
     let mut mark_queue: VecDeque<u64> = VecDeque::new();
     for root in object_model.roots() {
@@ -42,7 +68,10 @@ pub unsafe fn transitive_closure_node<O: ObjectModel>(mark_sense: u8, object_mod
     marked_object
 }
 
-pub unsafe fn transitive_closure_edge<O: ObjectModel>(mark_sense: u8, object_model: &mut O) -> u64 {
+unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
+    mark_sense: u8,
+    object_model: &mut O,
+) -> u64 {
     // Edge-Slot enqueuing
     let mut mark_queue: VecDeque<*mut u64> = VecDeque::new();
     let mut marked_object: u64 = 0;
