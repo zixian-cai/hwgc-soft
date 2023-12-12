@@ -6,10 +6,11 @@ use crate::ObjectModel;
 use std::collections::VecDeque;
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
-#[clap(rename_all="verbatim")]
+#[clap(rename_all = "verbatim")]
 pub enum TracingLoopChoice {
     EdgeSlot,
     EdgeObjref,
+    NodeObjref,
 }
 
 unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
@@ -39,6 +40,9 @@ pub fn transitive_closure<O: ObjectModel>(
                 transitive_closure_edge_objref(mark_sense, object_model)
             }
             TracingLoopChoice::EdgeSlot => transitive_closure_edge_slot(mark_sense, object_model),
+            TracingLoopChoice::NodeObjref => {
+                transitive_closure_node_objref(mark_sense, object_model)
+            }
         }
     }
 }
@@ -65,6 +69,32 @@ unsafe fn transitive_closure_edge_objref<O: ObjectModel>(
                 }
             });
         }
+    }
+    marked_object
+}
+
+unsafe fn transitive_closure_node_objref<O: ObjectModel>(
+    mark_sense: u8,
+    object_model: &mut O,
+) -> u64 {
+    // Node-ObjRef enqueuing
+    let mut scan_queue: VecDeque<u64> = VecDeque::new();
+    let mut marked_object: u64 = 0;
+    for root in object_model.roots() {
+        let o = *root;
+        if o != 0 && trace_object(o, mark_sense) {
+            marked_object += 1;
+            scan_queue.push_back(o);
+        }
+    }
+    while let Some(o) = scan_queue.pop_front() {
+        object_model.scan_object(o, |edge| {
+            let child = *edge;
+            if child != 0 && trace_object(child, mark_sense) {
+                marked_object += 1;
+                scan_queue.push_back(child);
+            }
+        });
     }
     marked_object
 }

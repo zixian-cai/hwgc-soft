@@ -13,7 +13,7 @@ use zsim_hooks::*;
 use clap::{Parser, ValueEnum};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
-#[clap(rename_all="verbatim")]
+#[clap(rename_all = "verbatim")]
 enum ObjectModelChoice {
     OpenJDK,
     OpenJDKAE,
