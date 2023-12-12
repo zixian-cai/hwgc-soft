@@ -8,7 +8,6 @@ import shutil
 from pathlib import Path
 import sys
 import argparse
-import itertools
 
 ROOT = Path(__file__).parent.parent.resolve()
 BUILDS = ROOT / "builds"
@@ -103,46 +102,46 @@ def main():
             "Bidirectional",
             "BidirectionalFallback",
         ]
-        tracing_loops = ["EdgeSlot", "EdgeObjref"]
+        tracing_loops = ["EdgeSlot", "EdgeObjref", "NodeObjref"]
 
         ITERATIONS = "25"
 
-        # Individual PGO
-        for object_model in object_models:
-            for tracing_loop in tracing_loops:
-                inputs = [
-                    ["-i", ITERATIONS, "-o", object_model, "-t", tracing_loop]
-                    + heapdumps
-                ]
-                profile_name = f"{object_model}_{tracing_loop}".replace("-", "_")
-                build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
+        # # Individual PGO
+        # for object_model in object_models:
+        #     for tracing_loop in tracing_loops:
+        #         inputs = [
+        #             ["-i", ITERATIONS, "-o", object_model, "-t", tracing_loop]
+        #             + heapdumps
+        #         ]
+        #         profile_name = f"{object_model}_{tracing_loop}".replace("-", "_")
+        #         build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
 
-        # Two object models
-        for tracing_loop in tracing_loops:
-            inputs = [
-                ["-i", ITERATIONS, "-o", "OpenJDK", "-t", tracing_loop] + heapdumps,
-                ["-i", ITERATIONS, "-o", "OpenJDKAE", "-t", tracing_loop] + heapdumps,
-            ]
-            profile_name = f"OpenJDK_both_{tracing_loop}".replace("-", "_")
-            build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
-        for tracing_loop in tracing_loops:
-            inputs = [
-                ["-i", ITERATIONS, "-o", "Bidirectional", "-t", tracing_loop]
-                + heapdumps,
-                ["-i", ITERATIONS, "-o", "BidirectionalFallback", "-t", tracing_loop]
-                + heapdumps,
-            ]
-            profile_name = f"Bidirectional_both_{tracing_loop}".replace("-", "_")
-            build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
+        # # Two object models
+        # for tracing_loop in tracing_loops:
+        #     inputs = [
+        #         ["-i", ITERATIONS, "-o", "OpenJDK", "-t", tracing_loop] + heapdumps,
+        #         ["-i", ITERATIONS, "-o", "OpenJDKAE", "-t", tracing_loop] + heapdumps,
+        #     ]
+        #     profile_name = f"OpenJDK_both_{tracing_loop}".replace("-", "_")
+        #     build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
+        # for tracing_loop in tracing_loops:
+        #     inputs = [
+        #         ["-i", ITERATIONS, "-o", "Bidirectional", "-t", tracing_loop]
+        #         + heapdumps,
+        #         ["-i", ITERATIONS, "-o", "BidirectionalFallback", "-t", tracing_loop]
+        #         + heapdumps,
+        #     ]
+        #     profile_name = f"Bidirectional_both_{tracing_loop}".replace("-", "_")
+        #     build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
 
-        # Two tracing loops
-        for object_model in object_models:
-            inputs = [
-                ["-i", ITERATIONS, "-o", object_model, "-t", "EdgeObjref"] + heapdumps,
-                ["-i", ITERATIONS, "-o", object_model, "-t", "EdgeSlot"] + heapdumps,
-            ]
-            profile_name = f"{object_model}_edge_both".replace("-", "_")
-            build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
+        # # Two tracing loops
+        # for object_model in object_models:
+        #     inputs = [
+        #         ["-i", ITERATIONS, "-o", object_model, "-t", "EdgeObjref"] + heapdumps,
+        #         ["-i", ITERATIONS, "-o", object_model, "-t", "EdgeSlot"] + heapdumps,
+        #     ]
+        #     profile_name = f"{object_model}_edge_both".replace("-", "_")
+        #     build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
 
         # All in one
         inputs = []

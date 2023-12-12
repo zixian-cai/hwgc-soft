@@ -8,5 +8,4 @@ BUILDS = ROOT / "builds"
 
 exe = BUILDS / sys.argv[1]
 cmd = "{} {}".format(exe, " ".join(sys.argv[3:]))
-print(cmd)
 os.system(cmd)

@@ -1,0 +1,32 @@
+includes:
+  - "$RUNNING_NG_PACKAGE_DATA/base/runbms-anu.yml"
+
+overrides:
+  "invocations": 20
+
+suites:
+  heapdump:
+    type: BinaryBenchmarkSuite
+    programs:
+      fop:
+        path: "/bin/true"
+        args: "$PWD/builds/dumps/heapdump.3.binpb.zst $PWD/builds/dumps/heapdump.4.binpb.zst $PWD/builds/dumps/heapdump.5.binpb.zst $PWD/builds/dumps/heapdump.6.binpb.zst $PWD/builds/dumps/heapdump.7.binpb.zst $PWD/builds/dumps/heapdump.8.binpb.zst $PWD/builds/dumps/heapdump.9.binpb.zst $PWD/builds/dumps/heapdump.10.binpb.zst $PWD/builds/dumps/heapdump.11.binpb.zst $PWD/builds/dumps/heapdump.12.binpb.zst $PWD/builds/dumps/heapdump.13.binpb.zst $PWD/builds/dumps/heapdump.14.binpb.zst $PWD/builds/dumps/heapdump.15.binpb.zst $PWD/builds/dumps/heapdump.16.binpb.zst $PWD/builds/dumps/heapdump.17.binpb.zst $PWD/builds/dumps/heapdump.18.binpb.zst $PWD/builds/dumps/heapdump.19.binpb.zst $PWD/builds/dumps/heapdump.20.binpb.zst $PWD/builds/dumps/heapdump.21.binpb.zst $PWD/builds/dumps/heapdump.22.binpb.zst"
+
+modifiers:
+  run_build:
+    type: Wrapper
+    val: "$PWD/scripts/runbms.py {0}"
+  om:
+    type: ProgramArg
+    val: "-o {0}"
+  tl:
+    type: ProgramArg
+    val: "-t {0}"
+
+runtimes:
+  native:
+    type: NativeExecutable
+
+benchmarks:
+  heapdump:
+    - fop
