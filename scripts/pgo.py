@@ -44,7 +44,7 @@ def build_profile_generate(pgo_dir: str, bin_name: str) -> str:
 
 
 def build_pgo(
-    pgo_dir: str, profile_gen_bin: str, profile_name: str, inputs: List[List[str]]
+    pgo_dir: str, profile_gen_bin: str, profile_name: str, inputs: List[List[str]], extra_rustflags: Optional[str]
 ):
     pgo = Path(pgo_dir)
     for profraw in pgo.glob("*.profraw"):
@@ -69,7 +69,10 @@ def build_pgo(
     ]
     logging.info(f"\t{cmd}")
     subprocess.check_output(cmd)
-    return cargo_wrapper(f"-Cprofile-use={profdata}", str(BUILDS / profile_name))
+    rustflags = f"-Cprofile-use={profdata}"
+    if extra_rustflags:
+        rustflags += f" {extra_rustflags}"
+    return cargo_wrapper(rustflags, str(BUILDS / profile_name))
 
 
 def parse_args():
@@ -153,6 +156,7 @@ def main():
                 )
         profile_name = f"all_in_one"
         build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
+        build_pgo(pgo_dir, profile_gen_path, f"{profile_name}_debug", inputs, "-g -Crelocation-model=static")
 
 
 if __name__ == "__main__":
