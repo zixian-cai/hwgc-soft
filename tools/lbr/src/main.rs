@@ -84,7 +84,7 @@ struct StackRecord {
     to: Address,
     predicted: bool,
     cycles: u64,
-    rtype: StackRecordType
+    rtype: StackRecordType,
 }
 
 impl From<&str> for StackRecord {
@@ -95,7 +95,7 @@ impl From<&str> for StackRecord {
             to: parts[1].into(),
             predicted: parts[2] == "P",
             cycles: parts[5].parse::<u64>().unwrap(),
-            rtype: parts[6].into()
+            rtype: parts[6].into(),
         }
     }
 }
@@ -110,7 +110,11 @@ impl LBRParser {
 
     fn parse_line_pair(&mut self, addr_line: &str, sym_line: &str) {
         let mut records = vec![];
-        for (addr_record, sym_record) in addr_line.trim().split_ascii_whitespace().zip(sym_line.trim().split_ascii_whitespace()) {
+        for (addr_record, sym_record) in addr_line
+            .trim()
+            .split_ascii_whitespace()
+            .zip(sym_line.trim().split_ascii_whitespace())
+        {
             if addr_record.is_empty() {
                 continue;
             }
@@ -409,7 +413,10 @@ impl Objdump {
             // We can't be in a function, continue executing, and execute
             // a branch instruction in another function without having
             // another branch in between
-            eprintln!("Range of instructions to be printed is not in the same function {:?} {:?}", from, to);
+            eprintln!(
+                "Range of instructions to be printed is not in the same function {:?} {:?}",
+                from, to
+            );
         }
         let func = self.functions.get(&from.function).unwrap();
         for inst in &func.insts {
