@@ -44,7 +44,11 @@ def build_profile_generate(pgo_dir: str, bin_name: str) -> str:
 
 
 def build_pgo(
-    pgo_dir: str, profile_gen_bin: str, profile_name: str, inputs: List[List[str]], extra_rustflags: Optional[str]
+    pgo_dir: str,
+    profile_gen_bin: str,
+    profile_name: str,
+    inputs: List[List[str]],
+    extra_rustflags: Optional[str] = None,
 ):
     pgo = Path(pgo_dir)
     for profraw in pgo.glob("*.profraw"):
@@ -156,7 +160,13 @@ def main():
                 )
         profile_name = f"all_in_one"
         build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
-        build_pgo(pgo_dir, profile_gen_path, f"{profile_name}_debug", inputs, "-g -Crelocation-model=static")
+        build_pgo(
+            pgo_dir,
+            profile_gen_path,
+            f"{profile_name}_debug",
+            inputs,
+            "-g",
+        )
 
 
 if __name__ == "__main__":
