@@ -1,16 +1,13 @@
 #[macro_use]
 extern crate log;
-
-use std::time::{Duration, Instant};
-
 use anyhow::Result;
+use clap::{Parser, ValueEnum};
+
+use std::time::Instant;
 
 use hwgc_soft::*;
-
 #[cfg(feature = "zsim")]
 use zsim_hooks::*;
-
-use clap::{Parser, ValueEnum};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
 #[clap(rename_all = "verbatim")]
@@ -84,19 +81,18 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
         }
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
-        let mut elapsed = Duration::ZERO;
         for i in 0..args.iterations {
             mark_sense = (i % 2 == 0) as u8;
-            let start: Instant = Instant::now();
-            let marked_objects =
-                transitive_closure(args.tracing_loop, mark_sense, &mut object_model);
-            elapsed = start.elapsed();
+            let timed_stats = transitive_closure(args.tracing_loop, mark_sense, &mut object_model);
             debug!(
                 "Finished marking {} objects in {} ms",
-                marked_objects,
-                elapsed.as_micros() as f64 / 1000f64
+                timed_stats.stats.marked_objects,
+                timed_stats.time.as_micros() as f64 / 1000f64
             );
-            debug_assert_eq!(marked_objects as usize, heapdump.objects.len());
+            debug_assert_eq!(
+                timed_stats.stats.marked_objects as usize,
+                heapdump.objects.len()
+            );
         }
         pauses += 1;
         time += elapsed.as_micros();

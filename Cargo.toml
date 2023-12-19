@@ -24,7 +24,7 @@ zstd = "0.12"
 anyhow = "1.0.75"
 libc = "0.2"
 lazy_static = "1.4.0"
-log = "0.4"
+log = { version = "0.4", features = ["release_max_level_warn"] }
 env_logger = "0.10"
 zsim-hooks = "0.1.0"
 clap = { version = "4.4.10", features = ["derive"] }
