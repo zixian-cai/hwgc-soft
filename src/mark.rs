@@ -17,6 +17,8 @@ pub enum TracingLoopChoice {
 #[derive(Debug)]
 pub struct TracingStats {
     pub marked_objects: u64,
+    pub slots: u64,
+    pub non_empty_slots: u64,
 }
 
 #[derive(Debug)]
@@ -71,7 +73,13 @@ unsafe fn transitive_closure_edge_objref<O: ObjectModel>(
 ) -> TracingStats {
     // Edge-ObjRef enqueuing
     let mut mark_queue: VecDeque<u64> = VecDeque::new();
+    let mut slots = 0;
+    let mut non_empty_slots = 0;
     for root in object_model.roots() {
+        if cfg!(feature = "detailed_stats") {
+            slots += 1;
+            non_empty_slots += 1;
+        }
         mark_queue.push_back(*root);
     }
     let mut marked_objects: u64 = 0;
@@ -79,16 +87,29 @@ unsafe fn transitive_closure_edge_objref<O: ObjectModel>(
         if trace_object(o, mark_sense) {
             // not previously marked, now marked
             // now scan
-            marked_objects += 1;
+            if cfg!(feature = "detailed_stats") {
+                marked_objects += 1;
+            }
             object_model.scan_object(o, |edge| {
                 let o = *edge;
+                if cfg!(feature = "detailed_stats") {
+                    slots += 1;
+                }
                 if o != 0 {
+                    if cfg!(feature = "detailed_stats") {
+                        non_empty_slots += 1;
+                    }
                     mark_queue.push_back(o)
                 }
             });
         }
     }
-    TracingStats { marked_objects }
+    println!("{} capa", mark_queue.capacity());
+    TracingStats {
+        marked_objects,
+        slots,
+        non_empty_slots,
+    }
 }
 
 unsafe fn transitive_closure_node_objref<O: ObjectModel>(
@@ -98,23 +119,45 @@ unsafe fn transitive_closure_node_objref<O: ObjectModel>(
     // Node-ObjRef enqueuing
     let mut scan_queue: VecDeque<u64> = VecDeque::new();
     let mut marked_objects: u64 = 0;
+    let mut slots: u64 = 0;
+    let mut non_empty_slots: u64 = 0;
     for root in object_model.roots() {
         let o = *root;
+        if cfg!(feature = "detailed_stats") {
+            slots += 1;
+            non_empty_slots += 1;
+        }
         if o != 0 && trace_object(o, mark_sense) {
-            marked_objects += 1;
+            if cfg!(feature = "detailed_stats") {
+                marked_objects += 1;
+            }
             scan_queue.push_back(o);
         }
     }
     while let Some(o) = scan_queue.pop_front() {
         object_model.scan_object(o, |edge| {
             let child = *edge;
-            if child != 0 && trace_object(child, mark_sense) {
-                marked_objects += 1;
-                scan_queue.push_back(child);
+            if cfg!(feature = "detailed_stats") {
+                slots += 1;
+            }
+            if child != 0 {
+                if cfg!(feature = "detailed_stats") {
+                    non_empty_slots += 1;
+                }
+                if trace_object(child, mark_sense) {
+                    if cfg!(feature = "detailed_stats") {
+                        marked_objects += 1;
+                    }
+                    scan_queue.push_back(child);
+                }
             }
         });
     }
-    TracingStats { marked_objects }
+    TracingStats {
+        marked_objects,
+        slots,
+        non_empty_slots,
+    }
 }
 
 unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
@@ -124,21 +167,43 @@ unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
     // Edge-Slot enqueuing
     let mut mark_queue: VecDeque<*mut u64> = VecDeque::new();
     let mut marked_objects: u64 = 0;
+    let mut slots = 0;
+    let mut non_empty_slots = 0;
     for root in object_model.roots() {
         let o = *root;
+        if cfg!(feature = "detailed_stats") {
+            slots += 1;
+            non_empty_slots += 1;
+        }
         if o != 0 && trace_object(o, mark_sense) {
-            marked_objects += 1;
+            if cfg!(feature = "detailed_stats") {
+                marked_objects += 1;
+            }
             object_model.scan_object(o, |edge| mark_queue.push_back(edge))
         }
     }
     while let Some(e) = mark_queue.pop_front() {
         let o = *e;
-        if o != 0 && trace_object(o, mark_sense) {
-            marked_objects += 1;
-            object_model.scan_object(o, |edge| mark_queue.push_back(edge))
+        if cfg!(feature = "detailed_stats") {
+            slots += 1;
+        }
+        if o != 0 {
+            if cfg!(feature = "detailed_stats") {
+                non_empty_slots += 1;
+            }
+            if trace_object(o, mark_sense) {
+                if cfg!(feature = "detailed_stats") {
+                    marked_objects += 1;
+                }
+                object_model.scan_object(o, |edge| mark_queue.push_back(edge))
+            }
         }
     }
-    TracingStats { marked_objects }
+    TracingStats {
+        marked_objects,
+        slots,
+        non_empty_slots,
+    }
 }
 
 pub fn verify_mark<O: ObjectModel>(mark_sense: u8, object_model: &mut O) {

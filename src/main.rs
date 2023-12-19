@@ -50,6 +50,9 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
 
     let mut time = 0;
     let mut pauses = 0;
+    let mut marked_objects = 0;
+    let mut slots = 0;
+    let mut non_empty_slots = 0;
 
     for path in &args.paths {
         // reset object model internal states
@@ -58,22 +61,28 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
         // mmap
         heapdump.map_spaces()?;
         // write objects to the heap
-        let start = Instant::now();
-        object_model.restore_objects(&heapdump);
-        let elapsed = start.elapsed();
-        info!(
-            "Finish deserializing the heapdump, {} objects in {} ms",
-            heapdump.objects.len(),
-            elapsed.as_micros() as f64 / 1000f64
-        );
-        if cfg!(debug_assertions) {
-            let sanity_traced_objects = sanity_trace(&heapdump);
+        {
+            let start = Instant::now();
+            object_model.restore_objects(&heapdump);
+            let elapsed = start.elapsed();
             info!(
-                "Sanity trace reporting {} reachable objects",
-                sanity_traced_objects
+                "Finish deserializing the heapdump, {} objects in {} ms",
+                heapdump.objects.len(),
+                elapsed.as_micros() as f64 / 1000f64
             );
-            assert_eq!(sanity_traced_objects, heapdump.objects.len());
         }
+        // sanity check
+        {
+            if cfg!(debug_assertions) {
+                let sanity_traced_objects = sanity_trace(&heapdump);
+                info!(
+                    "Sanity trace reporting {} reachable objects",
+                    sanity_traced_objects
+                );
+                assert_eq!(sanity_traced_objects, heapdump.objects.len());
+            }
+        }
+        // main tracing loop
         let mut mark_sense: u8 = 0;
         #[cfg(feature = "m5")]
         unsafe {
@@ -84,22 +93,38 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
         for i in 0..args.iterations {
             mark_sense = (i % 2 == 0) as u8;
             let timed_stats = transitive_closure(args.tracing_loop, mark_sense, &mut object_model);
-            debug!(
-                "Finished marking {} objects in {} ms",
+            let millis = timed_stats.time.as_micros() as f64 / 1000f64;
+            info!(
+                "Finished marking {} objects, and processing {} slots ({} non-empty) in {:.3} ms",
                 timed_stats.stats.marked_objects,
+                timed_stats.stats.slots,
+                timed_stats.stats.non_empty_slots,
+                millis
+            );
+            info!(
+                "That is, {:.1} objects/ms, and {:.1} slots/ms ({:.1} non-empty/ms)",
+                timed_stats.stats.marked_objects as f64 / millis,
+                timed_stats.stats.slots as f64 / millis,
+                timed_stats.stats.non_empty_slots as f64 / millis
+            );
+            if cfg!(feature = "detailed_stats") {
+                debug_assert_eq!(
+                    timed_stats.stats.marked_objects as usize,
+                    heapdump.objects.len()
+                );
+            }
+            if i == args.iterations - 1 {
+                pauses += 1;
+                time += timed_stats.time.as_micros();
+                marked_objects += timed_stats.stats.marked_objects;
+                slots += timed_stats.stats.slots;
+                non_empty_slots += timed_stats.stats.non_empty_slots;
+            }
+            info!(
+                "Final iteration {} ms",
                 timed_stats.time.as_micros() as f64 / 1000f64
             );
-            debug_assert_eq!(
-                timed_stats.stats.marked_objects as usize,
-                heapdump.objects.len()
-            );
         }
-        pauses += 1;
-        time += elapsed.as_micros();
-        info!(
-            "Final iteration {} ms",
-            elapsed.as_micros() as f64 / 1000f64
-        );
         #[cfg(feature = "m5")]
         unsafe {
             m5::m5_dump_reset_stats(0, 0);
@@ -111,8 +136,11 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
     }
 
     println!("============================ Tabulate Statistics ============================");
-    println!("pauses\ttime");
-    println!("{}\t{}", pauses, time);
+    println!("pauses\ttime\tobjects\tslots\tnon_empty_slots");
+    println!(
+        "{}\t{}\t{}\t{}\t{}",
+        pauses, time, marked_objects, slots, non_empty_slots
+    );
     println!("-------------------------- End Tabulate Statistics --------------------------");
     Ok(())
 }
