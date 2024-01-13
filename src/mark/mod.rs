@@ -11,6 +11,7 @@ pub enum TracingLoopChoice {
     EdgeSlot,
     EdgeObjref,
     NodeObjref,
+    DistributedNodeObjref,
 }
 
 #[derive(Debug)]
@@ -18,6 +19,7 @@ pub struct TracingStats {
     pub marked_objects: u64,
     pub slots: u64,
     pub non_empty_slots: u64,
+    pub sends: u64,
 }
 
 #[derive(Debug)]
@@ -42,6 +44,7 @@ unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
+mod distributed_node_objref;
 mod edge_objref;
 mod edge_slot;
 mod node_objref;
@@ -62,6 +65,12 @@ pub fn transitive_closure<O: ObjectModel>(
             }
             TracingLoopChoice::NodeObjref => {
                 node_objref::transitive_closure_node_objref(mark_sense, object_model)
+            }
+            TracingLoopChoice::DistributedNodeObjref => {
+                distributed_node_objref::transitive_closure_distributed_node_objref(
+                    mark_sense,
+                    object_model,
+                )
             }
         }
     };

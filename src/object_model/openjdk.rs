@@ -261,12 +261,8 @@ impl Tib {
         sum
     }
 
-    unsafe fn scan_object_fallback<F>(
-        tib: &Tib,
-        o: u64,
-        mut callback: F,
-        objects: &HashMap<u64, HeapObject>,
-    ) where
+    unsafe fn scan_object_fallback<F>(tib: &Tib, o: u64, mut callback: F)
+    where
         F: FnMut(*mut u64),
     {
         // println!("Object: {}, Tib Ptr: {:?}, Tib: {:?}", o, tib_ptr, tib);
@@ -309,14 +305,14 @@ impl Tib {
             }
         }
         // println!("{:?}", objects.get(&o).unwrap());
-        debug_assert_eq!(num_edges, objects.get(&o).unwrap().edges.len());
+        debug_assert_eq!(
+            num_edges,
+            OBJECT_MAPS.lock().unwrap().get(&o).unwrap().edges.len()
+        );
     }
 
-    unsafe fn scan_object<const AE: bool, F>(
-        o: u64,
-        mut callback: F,
-        objects: &HashMap<u64, HeapObject>,
-    ) where
+    unsafe fn scan_object<const AE: bool, F>(o: u64, mut callback: F)
+    where
         F: FnMut(*mut u64),
     {
         let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
@@ -325,14 +321,14 @@ impl Tib {
         }
         if !AE {
             let tib: &Tib = &*tib_ptr;
-            Self::scan_object_fallback(tib, o, callback, objects);
+            Self::scan_object_fallback(tib, o, callback);
             return;
         }
         let pattern = AlignmentEncoding::get_tib_code_for_region(tib_ptr as usize);
         match pattern {
             AlignmentEncodingPattern::Fallback => {
                 let tib: &Tib = &*tib_ptr;
-                Self::scan_object_fallback(tib, o, callback, objects);
+                Self::scan_object_fallback(tib, o, callback);
             }
             AlignmentEncodingPattern::RefArray => {
                 let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
@@ -373,8 +369,11 @@ struct OopMapBlock {
     count: u64,
 }
 
+lazy_static! {
+    static ref OBJECT_MAPS: Mutex<HashMap<u64, HeapObject>> = Mutex::new(HashMap::new());
+}
+
 pub struct OpenJDKObjectModel<const AE: bool> {
-    object_map: HashMap<u64, HeapObject>,
     objects: Vec<u64>,
     roots: Vec<u64>,
 }
@@ -388,8 +387,6 @@ impl<const AE: bool> Default for OpenJDKObjectModel<AE> {
 impl<const AE: bool> OpenJDKObjectModel<AE> {
     pub fn new() -> Self {
         OpenJDKObjectModel {
-            // For debugging
-            object_map: HashMap::new(),
             objects: vec![],
             roots: vec![],
         }
@@ -398,7 +395,7 @@ impl<const AE: bool> OpenJDKObjectModel<AE> {
 
 impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
     fn reset(&mut self) {
-        self.object_map.clear();
+        OBJECT_MAPS.lock().unwrap().clear();
         self.roots.clear();
         self.objects.clear();
     }
@@ -419,7 +416,10 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
 
     fn restore_objects(&mut self, heapdump: &HeapDump) {
         for object in &heapdump.objects {
-            self.object_map.insert(object.start, object.clone());
+            OBJECT_MAPS
+                .lock()
+                .unwrap()
+                .insert(object.start, object.clone());
             self.objects.push(object.start);
         }
 
@@ -464,12 +464,12 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
         }
     }
 
-    fn scan_object<F>(&self, o: u64, callback: F)
+    fn scan_object<F>(o: u64, callback: F)
     where
         F: FnMut(*mut u64),
     {
         unsafe {
-            Tib::scan_object::<AE, _>(o, callback, &self.object_map);
+            Tib::scan_object::<AE, _>(o, callback);
         }
     }
 

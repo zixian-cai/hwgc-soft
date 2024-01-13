@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
     mark_sense: u8,
-    object_model: &mut O,
+    object_model: &O,
 ) -> TracingStats {
     // Edge-Slot enqueuing
     let mut mark_queue: VecDeque<*mut u64> = VecDeque::new();
@@ -21,7 +21,7 @@ pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
             if cfg!(feature = "detailed_stats") {
                 marked_objects += 1;
             }
-            object_model.scan_object(o, |edge| mark_queue.push_back(edge))
+            O::scan_object(o, |edge| mark_queue.push_back(edge))
         }
     }
     while let Some(e) = mark_queue.pop_front() {
@@ -37,7 +37,7 @@ pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
                 if cfg!(feature = "detailed_stats") {
                     marked_objects += 1;
                 }
-                object_model.scan_object(o, |edge| mark_queue.push_back(edge))
+                O::scan_object(o, |edge| mark_queue.push_back(edge))
             }
         }
     }
@@ -45,5 +45,6 @@ pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
         marked_objects,
         slots,
         non_empty_slots,
+        sends: 0,
     }
 }

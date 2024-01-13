@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 pub(super) unsafe fn transitive_closure_node_objref<O: ObjectModel>(
     mark_sense: u8,
-    object_model: &mut O,
+    object_model: &O,
 ) -> TracingStats {
     // Node-ObjRef enqueuing
     let mut scan_queue: VecDeque<u64> = VecDeque::new();
@@ -25,7 +25,7 @@ pub(super) unsafe fn transitive_closure_node_objref<O: ObjectModel>(
         }
     }
     while let Some(o) = scan_queue.pop_front() {
-        object_model.scan_object(o, |edge| {
+        O::scan_object(o, |edge| {
             let child = *edge;
             if cfg!(feature = "detailed_stats") {
                 slots += 1;
@@ -47,5 +47,6 @@ pub(super) unsafe fn transitive_closure_node_objref<O: ObjectModel>(
         marked_objects,
         slots,
         non_empty_slots,
+        sends: 0,
     }
 }

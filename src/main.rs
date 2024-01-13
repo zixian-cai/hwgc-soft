@@ -53,6 +53,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
     let mut marked_objects = 0;
     let mut slots = 0;
     let mut non_empty_slots = 0;
+    let mut sends = 0;
 
     for path in &args.paths {
         // reset object model internal states
@@ -94,31 +95,34 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
             mark_sense = (i % 2 == 0) as u8;
             let timed_stats = transitive_closure(args.tracing_loop, mark_sense, &mut object_model);
             let millis = timed_stats.time.as_micros() as f64 / 1000f64;
+            let stats = timed_stats.stats;
             info!(
                 "Finished marking {} objects, and processing {} slots ({} non-empty) in {:.3} ms",
-                timed_stats.stats.marked_objects,
-                timed_stats.stats.slots,
-                timed_stats.stats.non_empty_slots,
-                millis
+                stats.marked_objects, stats.slots, stats.non_empty_slots, millis
             );
             info!(
                 "That is, {:.1} objects/ms, and {:.1} slots/ms ({:.1} non-empty/ms)",
-                timed_stats.stats.marked_objects as f64 / millis,
-                timed_stats.stats.slots as f64 / millis,
-                timed_stats.stats.non_empty_slots as f64 / millis
+                stats.marked_objects as f64 / millis,
+                stats.slots as f64 / millis,
+                stats.non_empty_slots as f64 / millis
             );
-            if cfg!(feature = "detailed_stats") {
-                debug_assert_eq!(
-                    timed_stats.stats.marked_objects as usize,
-                    heapdump.objects.len()
+            if stats.non_empty_slots != 0 {
+                info!(
+                    "Total communication: {}, {:.1}% of non-empty slots",
+                    stats.sends,
+                    stats.sends as f64 / stats.non_empty_slots as f64 * 100f64
                 );
+            }
+            if cfg!(feature = "detailed_stats") {
+                debug_assert_eq!(stats.marked_objects as usize, heapdump.objects.len());
             }
             if i == args.iterations - 1 {
                 pauses += 1;
                 time += timed_stats.time.as_micros();
-                marked_objects += timed_stats.stats.marked_objects;
-                slots += timed_stats.stats.slots;
-                non_empty_slots += timed_stats.stats.non_empty_slots;
+                marked_objects += stats.marked_objects;
+                slots += stats.slots;
+                non_empty_slots += stats.non_empty_slots;
+                sends += stats.sends;
             }
             info!(
                 "Final iteration {} ms",
@@ -136,10 +140,10 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
     }
 
     println!("============================ Tabulate Statistics ============================");
-    println!("pauses\ttime\tobjects\tslots\tnon_empty_slots");
+    println!("pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends");
     println!(
-        "{}\t{}\t{}\t{}\t{}",
-        pauses, time, marked_objects, slots, non_empty_slots
+        "{}\t{}\t{}\t{}\t{}\t{}",
+        pauses, time, marked_objects, slots, non_empty_slots, sends
     );
     println!("-------------------------- End Tabulate Statistics --------------------------");
     Ok(())
