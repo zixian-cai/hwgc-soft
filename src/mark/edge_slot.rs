@@ -1,0 +1,49 @@
+use super::{trace_object, TracingStats};
+use crate::ObjectModel;
+use std::collections::VecDeque;
+
+pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
+    mark_sense: u8,
+    object_model: &mut O,
+) -> TracingStats {
+    // Edge-Slot enqueuing
+    let mut mark_queue: VecDeque<*mut u64> = VecDeque::new();
+    let mut marked_objects: u64 = 0;
+    let mut slots = 0;
+    let mut non_empty_slots = 0;
+    for root in object_model.roots() {
+        let o = *root;
+        if cfg!(feature = "detailed_stats") {
+            slots += 1;
+            non_empty_slots += 1;
+        }
+        if o != 0 && trace_object(o, mark_sense) {
+            if cfg!(feature = "detailed_stats") {
+                marked_objects += 1;
+            }
+            object_model.scan_object(o, |edge| mark_queue.push_back(edge))
+        }
+    }
+    while let Some(e) = mark_queue.pop_front() {
+        let o = *e;
+        if cfg!(feature = "detailed_stats") {
+            slots += 1;
+        }
+        if o != 0 {
+            if cfg!(feature = "detailed_stats") {
+                non_empty_slots += 1;
+            }
+            if trace_object(o, mark_sense) {
+                if cfg!(feature = "detailed_stats") {
+                    marked_objects += 1;
+                }
+                object_model.scan_object(o, |edge| mark_queue.push_back(edge))
+            }
+        }
+    }
+    TracingStats {
+        marked_objects,
+        slots,
+        non_empty_slots,
+    }
+}
