@@ -1,38 +1,10 @@
 #[macro_use]
 extern crate log;
 use anyhow::Result;
-use clap::{Parser, ValueEnum};
 
-use std::time::Instant;
-
+use clap::Parser;
 use hwgc_soft::*;
-#[cfg(feature = "zsim")]
-use zsim_hooks::*;
-
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
-#[clap(rename_all = "verbatim")]
-enum ObjectModelChoice {
-    OpenJDK,
-    OpenJDKAE,
-    Bidirectional,
-    BidirectionalFallback,
-}
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    #[arg(required = true)]
-    paths: Vec<String>,
-
-    #[arg(short, long, default_value_t = 5)]
-    iterations: usize,
-
-    #[arg(short, long, value_enum)]
-    object_model: ObjectModelChoice,
-
-    #[arg(short, long, value_enum)]
-    tracing_loop: TracingLoopChoice,
-}
+use std::time::Instant;
 
 fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
     for path in &args.paths {
@@ -48,105 +20,14 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
         );
     }
 
-    let mut time = 0;
-    let mut pauses = 0;
-    let mut marked_objects = 0;
-    let mut slots = 0;
-    let mut non_empty_slots = 0;
-    let mut sends = 0;
-
-    for path in &args.paths {
-        // reset object model internal states
-        object_model.reset();
-        let heapdump = HeapDump::from_binpb_zst(path)?;
-        // mmap
-        heapdump.map_spaces()?;
-        // write objects to the heap
-        {
-            let start = Instant::now();
-            object_model.restore_objects(&heapdump);
-            let elapsed = start.elapsed();
-            info!(
-                "Finish deserializing the heapdump, {} objects in {} ms",
-                heapdump.objects.len(),
-                elapsed.as_micros() as f64 / 1000f64
-            );
+    if let Some(ref cmd) = args.command {
+        match cmd {
+            Commands::Trace(_) => reified_trace(object_model, args),
+            Commands::Analyze(_) => reified_analysis(object_model, args),
         }
-        // sanity check
-        {
-            if cfg!(debug_assertions) {
-                let sanity_traced_objects = sanity_trace(&heapdump);
-                info!(
-                    "Sanity trace reporting {} reachable objects",
-                    sanity_traced_objects
-                );
-                assert_eq!(sanity_traced_objects, heapdump.objects.len());
-            }
-        }
-        // main tracing loop
-        let mut mark_sense: u8 = 0;
-        #[cfg(feature = "m5")]
-        unsafe {
-            m5::m5_reset_stats(0, 0);
-        }
-        #[cfg(feature = "zsim")]
-        zsim_roi_begin();
-        for i in 0..args.iterations {
-            mark_sense = (i % 2 == 0) as u8;
-            let timed_stats = transitive_closure(args.tracing_loop, mark_sense, &mut object_model);
-            let millis = timed_stats.time.as_micros() as f64 / 1000f64;
-            let stats = timed_stats.stats;
-            info!(
-                "Finished marking {} objects, and processing {} slots ({} non-empty) in {:.3} ms",
-                stats.marked_objects, stats.slots, stats.non_empty_slots, millis
-            );
-            info!(
-                "That is, {:.1} objects/ms, and {:.1} slots/ms ({:.1} non-empty/ms)",
-                stats.marked_objects as f64 / millis,
-                stats.slots as f64 / millis,
-                stats.non_empty_slots as f64 / millis
-            );
-            if stats.non_empty_slots != 0 {
-                info!(
-                    "Total communication: {}, {:.1}% of non-empty slots",
-                    stats.sends,
-                    stats.sends as f64 / stats.non_empty_slots as f64 * 100f64
-                );
-            }
-            if cfg!(feature = "detailed_stats") {
-                debug_assert_eq!(stats.marked_objects as usize, heapdump.objects.len());
-            }
-            if i == args.iterations - 1 {
-                pauses += 1;
-                time += timed_stats.time.as_micros();
-                marked_objects += stats.marked_objects;
-                slots += stats.slots;
-                non_empty_slots += stats.non_empty_slots;
-                sends += stats.sends;
-            }
-            info!(
-                "Final iteration {} ms",
-                timed_stats.time.as_micros() as f64 / 1000f64
-            );
-        }
-        #[cfg(feature = "m5")]
-        unsafe {
-            m5::m5_dump_reset_stats(0, 0);
-        }
-        #[cfg(feature = "zsim")]
-        zsim_roi_end();
-        verify_mark(mark_sense, &mut object_model);
-        heapdump.unmap_spaces()?;
+    } else {
+        Ok(())
     }
-
-    println!("============================ Tabulate Statistics ============================");
-    println!("pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends");
-    println!(
-        "{}\t{}\t{}\t{}\t{}\t{}",
-        pauses, time, marked_objects, slots, non_empty_slots, sends
-    );
-    println!("-------------------------- End Tabulate Statistics --------------------------");
-    Ok(())
 }
 
 fn get_git_info() -> String {
