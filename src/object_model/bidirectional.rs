@@ -97,7 +97,7 @@ impl Tib {
 
     unsafe fn scan_object_fallback<F>(o: u64, mut callback: F)
     where
-        F: FnMut(*mut u64),
+        F: FnMut(*mut u64, u64),
     {
         let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
         if tib_ptr.is_null() {
@@ -107,23 +107,17 @@ impl Tib {
         match tib.ttype {
             TibType::ObjArray => {
                 let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
-                for i in 0..objarray_length {
-                    let slot = (o as *mut u64).wrapping_add(3 + i as usize);
-                    callback(slot);
-                }
+                callback((o as *mut u64).wrapping_add(3), objarray_length);
             }
             TibType::Ordinary => {
-                for i in 0..tib.num_refs {
-                    let slot = (o as *mut u64).wrapping_add(2 + i as usize);
-                    callback(slot);
-                }
+                callback((o as *mut u64).wrapping_add(2), tib.num_refs);
             }
         }
     }
 
     unsafe fn scan_object_header<F>(o: u64, mut callback: F)
     where
-        F: FnMut(*mut u64),
+        F: FnMut(*mut u64, u64),
     {
         let header = Header::load(o);
         let status_byte = header.get_byte(Self::STATUS_BYTE_OFFSET);
@@ -133,17 +127,11 @@ impl Tib {
             }
             1 => {
                 let num_refs = header.get_byte(Self::NUMREFS_BYTE_OFFSET);
-                for i in 0..num_refs {
-                    let slot = (o as *mut u64).wrapping_add(2 + i as usize);
-                    callback(slot);
-                }
+                callback((o as *mut u64).wrapping_add(2), num_refs as u64);
             }
             2 => {
                 let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
-                for i in 0..objarray_length {
-                    let slot = (o as *mut u64).wrapping_add(3 + i as usize);
-                    callback(slot);
-                }
+                callback((o as *mut u64).wrapping_add(3), objarray_length);
             }
             u8::MAX => Self::scan_object_fallback(o, callback),
             _ => {
@@ -154,7 +142,7 @@ impl Tib {
 
     unsafe fn scan_object<const HEADER: bool, F>(o: u64, callback: F)
     where
-        F: FnMut(*mut u64),
+        F: FnMut(*mut u64, u64),
     {
         if HEADER {
             Self::scan_object_header(o, callback);
@@ -287,7 +275,7 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
 
     fn scan_object<F>(o: u64, callback: F)
     where
-        F: FnMut(*mut u64),
+        F: FnMut(*mut u64, u64),
     {
         unsafe { Tib::scan_object::<HEADER, _>(o, callback) }
     }

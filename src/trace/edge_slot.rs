@@ -23,7 +23,11 @@ pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
             if cfg!(feature = "detailed_stats") {
                 marked_objects += 1;
             }
-            O::scan_object(o, |edge| mark_queue.push_back(edge))
+            O::scan_object(o, |edge, repeat| {
+                for i in 0..repeat {
+                    mark_queue.push_back(edge.wrapping_add(i as usize));
+                }
+            })
         }
     }
     while let Some(e) = mark_queue.pop_front() {
@@ -39,7 +43,11 @@ pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
                 if cfg!(feature = "detailed_stats") {
                     marked_objects += 1;
                 }
-                O::scan_object(o, |edge| mark_queue.push_back(edge))
+                O::scan_object(o, |edge, repeat| {
+                    for i in 0..repeat {
+                        mark_queue.push_back(edge.wrapping_add(i as usize));
+                    }
+                })
             }
         }
     }

@@ -59,29 +59,31 @@ impl DistGCThread {
         loop {
             while let Some(o) = self.scan_queue.pop_front() {
                 debug_assert_eq!(get_owner_thread(o), self.id);
-                O::scan_object(o, |edge| {
-                    let child = *edge;
-                    if cfg!(feature = "detailed_stats") {
-                        SLOTS.fetch_add(1, Ordering::Relaxed);
-                    }
-                    if child != 0 {
+                O::scan_object(o, |edge, repeat| {
+                    for i in 0..repeat {
+                        let child = *edge.wrapping_add(i as usize);
                         if cfg!(feature = "detailed_stats") {
-                            NON_EMPTY_SLOTS.fetch_add(1, Ordering::Relaxed);
+                            SLOTS.fetch_add(1, Ordering::Relaxed);
                         }
-                        let owner = get_owner_thread(child);
-                        if owner == self.id {
-                            if trace_object(child, mark_sense) {
-                                if cfg!(feature = "detailed_stats") {
-                                    MARKED_OBJECTS.fetch_add(1, Ordering::Relaxed);
-                                }
-                                self.scan_queue.push_back(child);
-                            }
-                        } else {
-                            // trace!("{} -> {} {}", self.id, owner, child);
+                        if child != 0 {
                             if cfg!(feature = "detailed_stats") {
-                                SENDS.fetch_add(1, Ordering::Relaxed);
+                                NON_EMPTY_SLOTS.fetch_add(1, Ordering::Relaxed);
                             }
-                            self.senders[owner].send(child).unwrap();
+                            let owner = get_owner_thread(child);
+                            if owner == self.id {
+                                if trace_object(child, mark_sense) {
+                                    if cfg!(feature = "detailed_stats") {
+                                        MARKED_OBJECTS.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                    self.scan_queue.push_back(child);
+                                }
+                            } else {
+                                // trace!("{} -> {} {}", self.id, owner, child);
+                                if cfg!(feature = "detailed_stats") {
+                                    SENDS.fetch_add(1, Ordering::Relaxed);
+                                }
+                                self.senders[owner].send(child).unwrap();
+                            }
                         }
                     }
                 });

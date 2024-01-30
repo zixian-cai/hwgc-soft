@@ -27,16 +27,18 @@ pub(super) unsafe fn transitive_closure_edge_objref<O: ObjectModel>(
             if cfg!(feature = "detailed_stats") {
                 marked_objects += 1;
             }
-            O::scan_object(o, |edge| {
-                let o = *edge;
-                if cfg!(feature = "detailed_stats") {
-                    slots += 1;
-                }
-                if o != 0 {
+            O::scan_object(o, |edge, repeat| {
+                for i in 0..repeat {
+                    let o = *edge.wrapping_add(i as usize);
                     if cfg!(feature = "detailed_stats") {
-                        non_empty_slots += 1;
+                        slots += 1;
                     }
-                    mark_queue.push_back(o)
+                    if o != 0 {
+                        if cfg!(feature = "detailed_stats") {
+                            non_empty_slots += 1;
+                        }
+                        mark_queue.push_back(o)
+                    }
                 }
             });
         }

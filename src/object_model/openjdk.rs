@@ -263,7 +263,7 @@ impl Tib {
 
     unsafe fn scan_object_fallback<F>(tib: &Tib, o: u64, mut callback: F)
     where
-        F: FnMut(*mut u64),
+        F: FnMut(*mut u64, u64),
     {
         // println!("Object: {}, Tib Ptr: {:?}, Tib: {:?}", o, tib_ptr, tib);
         let mut num_edges = 0;
@@ -271,49 +271,35 @@ impl Tib {
             TibType::ObjArray => {
                 let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
                 // println!("Objarray length: {}", objarray_length);
-                for i in 0..objarray_length {
-                    let slot = (o as *mut u64).wrapping_add(3 + i as usize);
-                    callback(slot);
-                    num_edges += 1;
-                }
+                callback((o as *mut u64).wrapping_add(3), objarray_length);
+                num_edges += objarray_length;
             }
             TibType::InstanceMirror => {
                 for omb in &tib.oop_map_blocks {
-                    for i in 0..omb.count {
-                        let slot = (o as *mut u8).wrapping_add(omb.offset as usize + i as usize * 8)
-                            as *mut u64;
-                        callback(slot);
-                        num_edges += 1;
-                    }
+                    callback((o as *mut u64).wrapping_add(omb.offset as usize), omb.count);
+                    num_edges += omb.count;
                 }
                 let (start, count) = &tib.instance_mirror_info.unwrap();
-                for i in 0..*count {
-                    let slot = ((*start) as *mut u64).wrapping_add(i as usize);
-                    callback(slot);
-                    num_edges += 1;
-                }
+                callback((o as *mut u64).wrapping_add(*start as usize), *count);
+                num_edges += *count;
             }
             TibType::Ordinary => {
                 for omb in &tib.oop_map_blocks {
-                    for i in 0..omb.count {
-                        let slot = (o as *mut u8).wrapping_add(omb.offset as usize + i as usize * 8)
-                            as *mut u64;
-                        callback(slot);
-                        num_edges += 1;
-                    }
+                    callback((o as *mut u64).wrapping_add(omb.offset as usize), omb.count);
+                    num_edges += omb.count;
                 }
             }
         }
         // println!("{:?}", objects.get(&o).unwrap());
         debug_assert_eq!(
             num_edges,
-            OBJECT_MAPS.lock().unwrap().get(&o).unwrap().edges.len()
+            OBJECT_MAPS.lock().unwrap().get(&o).unwrap().edges.len() as u64
         );
     }
 
     unsafe fn scan_object<const AE: bool, F>(o: u64, mut callback: F)
     where
-        F: FnMut(*mut u64),
+        F: FnMut(*mut u64, u64),
     {
         let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
         if tib_ptr.is_null() {
@@ -332,31 +318,23 @@ impl Tib {
             }
             AlignmentEncodingPattern::RefArray => {
                 let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
-                for i in 0..objarray_length {
-                    let slot = (o as *mut u64).wrapping_add(3 + i as usize);
-                    callback(slot);
-                }
+                callback((o as *mut u64).wrapping_add(3), objarray_length);
             }
             AlignmentEncodingPattern::NoRef => {}
             AlignmentEncodingPattern::Ref0 => {
-                callback((o as *mut u64).wrapping_add(2));
+                callback((o as *mut u64).wrapping_add(2), 1);
             }
             AlignmentEncodingPattern::Ref1_2_3 => {
-                callback((o as *mut u64).wrapping_add(3));
-                callback((o as *mut u64).wrapping_add(4));
-                callback((o as *mut u64).wrapping_add(5));
+                callback((o as *mut u64).wrapping_add(3), 3);
             }
             AlignmentEncodingPattern::Ref4_5_6 => {
-                callback((o as *mut u64).wrapping_add(6));
-                callback((o as *mut u64).wrapping_add(7));
-                callback((o as *mut u64).wrapping_add(8));
+                callback((o as *mut u64).wrapping_add(6), 3);
             }
             AlignmentEncodingPattern::Ref2 => {
-                callback((o as *mut u64).wrapping_add(4));
+                callback((o as *mut u64).wrapping_add(4), 1);
             }
             AlignmentEncodingPattern::Ref0_1 => {
-                callback((o as *mut u64).wrapping_add(2));
-                callback((o as *mut u64).wrapping_add(3));
+                callback((o as *mut u64).wrapping_add(2), 2);
             }
         }
     }
@@ -466,7 +444,7 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
 
     fn scan_object<F>(o: u64, callback: F)
     where
-        F: FnMut(*mut u64),
+        F: FnMut(*mut u64, u64),
     {
         unsafe {
             Tib::scan_object::<AE, _>(o, callback);

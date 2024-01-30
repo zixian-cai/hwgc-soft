@@ -27,20 +27,22 @@ pub(super) unsafe fn transitive_closure_node_objref<O: ObjectModel>(
         }
     }
     while let Some(o) = scan_queue.pop_front() {
-        O::scan_object(o, |edge| {
-            let child = *edge;
-            if cfg!(feature = "detailed_stats") {
-                slots += 1;
-            }
-            if child != 0 {
+        O::scan_object(o, |edge, repeat| {
+            for i in 0..repeat {
+                let child = *edge.wrapping_add(i as usize);
                 if cfg!(feature = "detailed_stats") {
-                    non_empty_slots += 1;
+                    slots += 1;
                 }
-                if trace_object(child, mark_sense) {
+                if child != 0 {
                     if cfg!(feature = "detailed_stats") {
-                        marked_objects += 1;
+                        non_empty_slots += 1;
                     }
-                    scan_queue.push_back(child);
+                    if trace_object(child, mark_sense) {
+                        if cfg!(feature = "detailed_stats") {
+                            marked_objects += 1;
+                        }
+                        scan_queue.push_back(child);
+                    }
                 }
             }
         });

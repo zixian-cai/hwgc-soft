@@ -177,19 +177,22 @@ impl Analysis {
         header.store(o);
         // now we need to scan it
         let object_owner = self.get_owner_thread(o);
-        O::scan_object(o, |edge| {
-            let edge_owner = self.get_owner_thread(edge as u64);
-            if edge_owner == object_owner {
-                self.stats.slots += 1;
-                let child = unsafe { *edge };
-                if child == 0 {
-                    return;
+        O::scan_object(o, |e, repeat| {
+            for i in 0..repeat {
+                let edge = e.wrapping_add(i as usize);
+                let edge_owner = self.get_owner_thread(edge as u64);
+                if edge_owner == object_owner {
+                    self.stats.slots += 1;
+                    let child = unsafe { *edge };
+                    if child == 0 {
+                        return;
+                    }
+                    self.stats.non_empty_slots += 1;
+                    let child_owner = self.get_owner_thread(child);
+                    self.create_process_node_work(object_owner, child_owner, child, true);
+                } else {
+                    self.create_process_edge_work(object_owner, edge_owner, edge);
                 }
-                self.stats.non_empty_slots += 1;
-                let child_owner = self.get_owner_thread(child);
-                self.create_process_node_work(object_owner, child_owner, child, true);
-            } else {
-                self.create_process_edge_work(object_owner, edge_owner, edge);
             }
         })
     }
@@ -232,7 +235,8 @@ impl Analysis {
         let mut last_known_slot_start: Option<*mut u64> = None;
         let mut last_known_slot_count: usize = 0;
 
-        O::scan_object(o, |edge| {
+        O::scan_object(o, |edge, _repeat| {
+            // FIXME repeat
             let edge_owner = self.get_owner_thread(edge as u64);
             if edge_owner == object_owner {
                 if last_known_receiver.is_some() {
