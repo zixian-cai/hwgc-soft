@@ -276,16 +276,22 @@ impl Tib {
             }
             TibType::InstanceMirror => {
                 for omb in &tib.oop_map_blocks {
-                    callback((o as *mut u64).wrapping_add(omb.offset as usize), omb.count);
+                    callback(
+                        (o as *mut u8).wrapping_add(omb.offset as usize) as *mut u64,
+                        omb.count,
+                    );
                     num_edges += omb.count;
                 }
                 let (start, count) = &tib.instance_mirror_info.unwrap();
-                callback((o as *mut u64).wrapping_add(*start as usize), *count);
+                callback((*start) as *mut u64, *count);
                 num_edges += *count;
             }
             TibType::Ordinary => {
                 for omb in &tib.oop_map_blocks {
-                    callback((o as *mut u64).wrapping_add(omb.offset as usize), omb.count);
+                    callback(
+                        (o as *mut u8).wrapping_add(omb.offset as usize) as *mut u64,
+                        omb.count,
+                    );
                     num_edges += omb.count;
                 }
             }
