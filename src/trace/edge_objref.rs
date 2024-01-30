@@ -13,7 +13,9 @@ pub(super) unsafe fn transitive_closure_edge_objref<O: ObjectModel>(
     for root in object_model.roots() {
         if cfg!(feature = "detailed_stats") {
             slots += 1;
-            non_empty_slots += 1;
+            if *root != 0 {
+                non_empty_slots += 1;
+            }
         }
         mark_queue.push_back(*root);
     }

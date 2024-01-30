@@ -146,7 +146,9 @@ pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
         let o = *root;
         if cfg!(feature = "detailed_stats") {
             SLOTS.fetch_add(1, Ordering::Relaxed);
-            NON_EMPTY_SLOTS.fetch_add(1, Ordering::Relaxed);
+            if o != 0 {
+                NON_EMPTY_SLOTS.fetch_add(1, Ordering::Relaxed);
+            }
         }
         if o != 0 {
             let owner = get_owner_thread(o);

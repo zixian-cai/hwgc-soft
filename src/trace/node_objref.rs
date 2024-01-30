@@ -15,7 +15,9 @@ pub(super) unsafe fn transitive_closure_node_objref<O: ObjectModel>(
         let o = *root;
         if cfg!(feature = "detailed_stats") {
             slots += 1;
-            non_empty_slots += 1;
+            if o != 0 {
+                non_empty_slots += 1;
+            }
         }
         if o != 0 && trace_object(o, mark_sense) {
             if cfg!(feature = "detailed_stats") {

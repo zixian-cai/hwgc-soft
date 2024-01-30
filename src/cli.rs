@@ -31,9 +31,9 @@ pub struct TraceArgs {
 #[derive(Parser, Debug, Clone, Copy)]
 pub struct AnalysisArgs {
     #[arg(short, long, default_value_t = 6)]
-    owner_shift: usize,
+    pub(crate) owner_shift: usize,
     #[arg(short, long, default_value_t = 3)]
-    log_num_threads: usize,
+    pub(crate) log_num_threads: usize,
 }
 
 #[derive(Subcommand, Debug)]
