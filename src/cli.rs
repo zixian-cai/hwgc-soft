@@ -34,6 +34,8 @@ pub struct AnalysisArgs {
     pub(crate) owner_shift: usize,
     #[arg(short, long, default_value_t = 3)]
     pub(crate) log_num_threads: usize,
+    #[arg(short, long, default_value_t = false)]
+    pub(crate) group_slots: bool,
 }
 
 #[derive(Subcommand, Debug)]

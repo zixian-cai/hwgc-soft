@@ -5,7 +5,7 @@ use anyhow::Result;
 
 #[allow(clippy::enum_variant_names)]
 enum Work {
-    ProcessEdges { from: *mut u64, to: *mut u64 },
+    ProcessEdges { start: *mut u64, count: usize },
     ProcessEdge(*mut u64),
     ProcessNode(u64),
 }
@@ -27,6 +27,7 @@ struct Analysis {
     num_threads: usize,
     work_queue: VecDeque<TaggedWork>,
     stats: AnalysisStats,
+    group_slots: bool,
 }
 
 #[derive(Default)]
@@ -62,6 +63,7 @@ impl Analysis {
             num_threads: 1 << args.log_num_threads,
             work_queue: VecDeque::new(),
             stats: Default::default(),
+            group_slots: args.group_slots,
         }
     }
 
@@ -95,9 +97,15 @@ impl Analysis {
     fn do_work<O: ObjectModel>(&mut self, work: TaggedWork) {
         let inner_work = work.work;
         match inner_work {
-            Work::ProcessEdges { from, to } => self.do_process_edges(from, to),
+            Work::ProcessEdges { start, count } => self.do_process_edges(start, count),
             Work::ProcessEdge(e) => self.do_process_edge(e),
-            Work::ProcessNode(o) => self.do_process_node::<O>(o),
+            Work::ProcessNode(o) => {
+                if self.group_slots {
+                    self.do_process_node_grouped::<O>(o)
+                } else {
+                    self.do_process_node::<O>(o)
+                }
+            }
         }
     }
 
@@ -106,6 +114,25 @@ impl Analysis {
             creator: Worker::Numbered(creator),
             worker: Worker::Numbered(worker),
             work: Work::ProcessEdge(e),
+        };
+        if work.creator != work.worker {
+            self.stats.total_msgs += 1;
+            self.stats.msg_invisible_slot += 1;
+        }
+        self.create_work(work);
+    }
+
+    fn create_process_edge_work_grouped(
+        &mut self,
+        creator: usize,
+        worker: usize,
+        start: *mut u64,
+        count: usize,
+    ) {
+        let work = TaggedWork {
+            creator: Worker::Numbered(creator),
+            worker: Worker::Numbered(worker),
+            work: Work::ProcessEdges { start, count },
         };
         if work.creator != work.worker {
             self.stats.total_msgs += 1;
@@ -150,7 +177,6 @@ impl Analysis {
         header.store(o);
         // now we need to scan it
         let object_owner = self.get_owner_thread(o);
-        // Some slots might not be visible to us
         O::scan_object(o, |edge| {
             let edge_owner = self.get_owner_thread(edge as u64);
             if edge_owner == object_owner {
@@ -168,6 +194,99 @@ impl Analysis {
         })
     }
 
+    fn flush_grouped_slots(
+        &mut self,
+        creator: usize,
+        last_known_receiver: &mut Option<usize>,
+        last_known_slot_start: &mut Option<*mut u64>,
+        last_known_slot_count: &mut usize,
+    ) {
+        if let Some(r) = last_known_receiver {
+            self.create_process_edge_work_grouped(
+                creator,
+                *r,
+                last_known_slot_start.unwrap(),
+                *last_known_slot_count,
+            );
+            *last_known_receiver = None;
+            *last_known_slot_start = None;
+            *last_known_slot_count = 0;
+        }
+    }
+
+    fn do_process_node_grouped<O: ObjectModel>(&mut self, o: u64) {
+        debug_assert_ne!(o, 0);
+        let mut header = Header::load(o);
+        let mark_byte = header.get_mark_byte();
+        if mark_byte == 1 {
+            return;
+        }
+        self.stats.marked_objects += 1;
+        // mark the object
+        header.set_mark_byte(1);
+        header.store(o);
+        // now we need to scan it
+        let object_owner = self.get_owner_thread(o);
+
+        let mut last_known_receiver: Option<usize> = None;
+        let mut last_known_slot_start: Option<*mut u64> = None;
+        let mut last_known_slot_count: usize = 0;
+
+        O::scan_object(o, |edge| {
+            let edge_owner = self.get_owner_thread(edge as u64);
+            if edge_owner == object_owner {
+                if last_known_receiver.is_some() {
+                    self.flush_grouped_slots(
+                        object_owner,
+                        &mut last_known_receiver,
+                        &mut last_known_slot_start,
+                        &mut last_known_slot_count,
+                    );
+                }
+                self.stats.slots += 1;
+                let child = unsafe { *edge };
+                if child == 0 {
+                    return;
+                }
+                self.stats.non_empty_slots += 1;
+                let child_owner = self.get_owner_thread(child);
+                self.create_process_node_work(object_owner, child_owner, child, true);
+            } else {
+                if let Some(r) = last_known_receiver {
+                    // There is an existing group
+                    if edge_owner == r {
+                        // We are using the same group
+                        let s = last_known_slot_start.unwrap();
+                        if s.wrapping_add(1) == edge {
+                            // The slot we are looking at is adjacent
+                            last_known_slot_count += 1;
+                            return;
+                        }
+                    }
+                }
+                // Unless all the above conditions are satisfied
+                // We flush
+                self.flush_grouped_slots(
+                    object_owner,
+                    &mut last_known_receiver,
+                    &mut last_known_slot_start,
+                    &mut last_known_slot_count,
+                );
+                // and then start a new group
+                last_known_receiver = Some(edge_owner);
+                last_known_slot_count = 1;
+                last_known_slot_start = Some(edge);
+            }
+        });
+        // Do a final flush for any leftover
+        self.flush_grouped_slots(
+            object_owner,
+            &mut last_known_receiver,
+            &mut last_known_slot_start,
+            &mut last_known_slot_count,
+        );
+    }
+
     fn do_process_edge(&mut self, e: *mut u64) {
         let edge_owner = self.get_owner_thread(e as u64);
         let child = unsafe { *e };
@@ -180,8 +299,19 @@ impl Analysis {
         self.create_process_node_work(edge_owner, child_owner, child, false);
     }
 
-    fn do_process_edges(&mut self, _from: *mut u64, _to: *mut u64) {
-        todo!()
+    fn do_process_edges(&mut self, start: *mut u64, count: usize) {
+        let edge_owner = self.get_owner_thread(start as u64);
+        for i in 0..count {
+            let slot = start.wrapping_add(i);
+            let child = unsafe { *slot };
+            self.stats.slots += 1;
+            if child == 0 {
+                continue;
+            }
+            self.stats.non_empty_slots += 1;
+            let child_owner = self.get_owner_thread(child);
+            self.create_process_node_work(edge_owner, child_owner, child, false);
+        }
     }
 
     fn run<O: ObjectModel>(&mut self, o: &O) {
@@ -224,10 +354,12 @@ impl Analysis {
         }
         println!();
         println!("-------------------------- End Tabulate Statistics --------------------------");
-        assert_eq!(
-            self.stats.total_work,
-            self.stats.non_empty_slots + self.stats.msg_invisible_slot
-        );
+        if !self.group_slots {
+            assert_eq!(
+                self.stats.total_work,
+                self.stats.non_empty_slots + self.stats.msg_invisible_slot
+            );
+        }
     }
 }
 
