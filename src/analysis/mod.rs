@@ -36,30 +36,74 @@ struct Analysis {
     next_stride_delta: usize,
 }
 
+/// Statistics about communication in a distributed near-memory GC
+///
+/// All slots (edges) can be categorized as follows:
+/// 1. Empty slots
+/// 2. Non-empty slots
+///
+/// 1.a Empty slot, visible: a worker scanning the object can also load from the
+/// slot, and then discovers that the slot holds null. No further
+/// 1.b Empty slot, invisible: a worker scanning the object has to delegate
+/// someone else to load the slot (using the ProcessEdge message, or the
+/// ProcessEdges message), which subsequently turns out to be null.
+/// 2.a Non-empty slot, visible, visible child: a worker scanning the object
+/// can also load from the slot, and then discovers a child object, which is
+/// also visible. No message was sent in the process. This is rare (~1/N chance).
+/// 2.b Non-empty slot, visible, invisible child: a worker scanning the object
+/// can also load from the slot, and then discovers a child object, which is
+/// invisible. A ProcessNode message is sent.
+/// 2.c Non-empty slot, invisible, visible child: a worker scanning the object
+/// has to delegate someone else to load the slot (using the ProcessEdge
+/// message, or the ProcessEdges message), which is common. The child object
+/// happens to be visible to the delegate, which is rare.
+/// 2.d Non-empty slot, invisible, invisible child: a worker scanning the object
+/// has to delegate someone else to load the slot (using the ProcessEdge
+/// message, or the ProcessEdges message), which is common. The delegate
+/// discovers a child object, which is invisible. A ProcessNode message is sent.
+///
+/// Another classification is:
+/// 1. Visible slots:
+/// 1.a Visible, empty slot
+/// 1.b Visible, non-empty slot, visible child
+/// 1.c Visible, non-empty slot, invisible child: a ProcessNode message is sent.
+/// 2. Invisible slots: need to send ProcessEdge/ProcessEdges messages
+/// 2.a Invisible slot, empty slot
+/// 2.b Invisible slot, non-empty slot, visible child
+/// 2.c Invisible slot, non-empty slot, invisible child: a ProcessNode message is
+/// sent.
 #[derive(Default)]
 struct AnalysisStats {
-    // Total amount of work
-    // Which is equal to the the number of non-empty slots + invisible slots
-    // Because each non-empty slots has a referent that needs to be called
-    // process_node on using the ProcessNode packet
-    // And each invisible slot results in a ProcessEdge packet sent to
-    // another worker
+    /// Total amount of work
+    ///
+    /// This is equal to the the number of non-empty slots + invisible slots
+    /// when the group_slots optimization is disabled.
+    /// This is because each non-empty slots has a referent that needs to be called
+    /// process_node on using the ProcessNode packet
+    /// (a message may or may not be sent, depending on whether the child is
+    /// visible to the slot loader).
+    /// And each invisible slot results in a ProcessEdge packet sent to
+    /// another worker.
     total_work: u64,
-    total_msgs: u64,
-    marked_objects: u64,
-    /// The number of messages sent due to that the object being scanned is
-    /// not entirely visible to the worker
-    msg_invisible_slot: u64,
-    /// The number of messages sent due to delegating the scan of a child object
-    /// to another worker, when the slot (where the child ojbects are found) and
-    /// the parent object are owned by the same worker
-    msg_child_obj_not_owned_during_process_node: u64,
-    /// Someone delegated a slot/slots for us to load, and we discovered child
-    /// objects that are not owned by us
-    msg_child_obj_not_owned_during_process_edge: u64,
+    /// Distribuion of work among each worker
     work_dist: HashMap<usize, u64>,
-    non_empty_slots: u64,
+    /// Total objects marked
+    marked_objects: u64,
+    /// Total number of inter-worker messages sent
+    total_msgs: u64,
+    msg_process_node: u64,
+    msg_process_edge: u64,
+    msg_process_edges: u64,
+    /// Total number of slots
     slots: u64,
+    empty_root_slots: u64,
+    non_empty_root_slots: u64,
+    visible_empty_slots: u64,
+    visible_non_empty_slots_visible_child: u64,
+    visible_non_empty_slots_invisible_child: u64,
+    invisible_empty_slots: u64,
+    invisible_non_empty_slots_visible_child: u64,
+    invisible_non_empty_slots_invisible_child: u64,
 }
 
 impl Analysis {
@@ -92,6 +136,18 @@ impl Analysis {
             *self.stats.work_dist.entry(x).or_default() += 1;
         }
         self.stats.total_work += 1;
+        if let Worker::Numbered(x) = work.creator {
+            if let Worker::Numbered(y) = work.worker {
+                if x != y {
+                    self.stats.total_msgs += 1;
+                    match work.work {
+                        Work::ProcessEdges { .. } => self.stats.msg_process_edges += 1,
+                        Work::ProcessEdge(_) => self.stats.msg_process_edge += 1,
+                        Work::ProcessNode(_) => self.stats.msg_process_node += 1,
+                    }
+                }
+            }
+        }
         self.work_queue.push_back(work);
     }
 
@@ -114,7 +170,13 @@ impl Analysis {
                     }
                 }
             }
-            Work::ProcessEdge(e) => self.do_process_edge(e),
+            Work::ProcessEdge(e) => {
+                if let Worker::Numbered(w) = work.worker {
+                    if let Worker::Numbered(c) = work.creator {
+                        self.do_process_edge(c, w, e);
+                    }
+                }
+            }
             Work::ProcessNode(o) => {
                 if self.group_slots {
                     self.do_process_node_grouped::<O>(o)
@@ -131,10 +193,6 @@ impl Analysis {
             worker: Worker::Numbered(worker),
             work: Work::ProcessEdge(e),
         };
-        if work.creator != work.worker {
-            self.stats.total_msgs += 1;
-            self.stats.msg_invisible_slot += 1;
-        }
         self.create_work(work);
     }
 
@@ -150,33 +208,15 @@ impl Analysis {
             worker: Worker::Numbered(worker),
             work: Work::ProcessEdges { start, count },
         };
-        if work.creator != work.worker {
-            self.stats.total_msgs += 1;
-            self.stats.msg_invisible_slot += 1;
-        }
         self.create_work(work);
     }
 
-    fn create_process_node_work(
-        &mut self,
-        creator: usize,
-        worker: usize,
-        o: u64,
-        process_node: bool,
-    ) {
+    fn create_process_node_work(&mut self, creator: usize, worker: usize, o: u64) {
         let work = TaggedWork {
             creator: Worker::Numbered(creator),
             worker: Worker::Numbered(worker),
             work: Work::ProcessNode(o),
         };
-        if work.creator != work.worker {
-            self.stats.total_msgs += 1;
-            if process_node {
-                self.stats.msg_child_obj_not_owned_during_process_node += 1;
-            } else {
-                self.stats.msg_child_obj_not_owned_during_process_edge += 1;
-            }
-        }
         self.create_work(work);
     }
 
@@ -198,19 +238,28 @@ impl Analysis {
                 let edge = e.wrapping_add(i as usize);
                 let edge_owner = self.get_owner_thread(edge as u64);
                 if edge_owner == object_owner {
-                    self.stats.slots += 1;
                     let child = unsafe { *edge };
-                    if child == 0 {
-                        continue;
-                    }
-                    self.stats.non_empty_slots += 1;
-                    let child_owner = self.get_owner_thread(child);
-                    self.create_process_node_work(object_owner, child_owner, child, true);
+                    self.do_visible_slot(object_owner, child);
                 } else {
                     self.create_process_edge_work(object_owner, edge_owner, edge);
                 }
             }
         })
+    }
+
+    fn do_visible_slot(&mut self, worker: usize, child: u64) {
+        self.stats.slots += 1;
+        if child == 0 {
+            self.stats.visible_empty_slots += 1;
+        } else {
+            let child_owner = self.get_owner_thread(child);
+            self.create_process_node_work(worker, child_owner, child);
+            if child_owner == worker {
+                self.stats.visible_non_empty_slots_visible_child += 1;
+            } else {
+                self.stats.visible_non_empty_slots_invisible_child += 1;
+            }
+        }
     }
 
     fn do_process_node_grouped<O: ObjectModel>(&mut self, o: u64) {
@@ -232,14 +281,8 @@ impl Analysis {
                 // A lightweight process
                 let edge_owner = self.get_owner_thread(edge as u64);
                 if edge_owner == object_owner {
-                    self.stats.slots += 1;
                     let child = unsafe { *edge };
-                    if child == 0 {
-                        return;
-                    }
-                    self.stats.non_empty_slots += 1;
-                    let child_owner = self.get_owner_thread(child);
-                    self.create_process_node_work(object_owner, child_owner, child, true);
+                    self.do_visible_slot(object_owner, child);
                 } else {
                     self.create_process_edge_work(object_owner, edge_owner, edge);
                 }
@@ -285,16 +328,26 @@ impl Analysis {
         });
     }
 
-    fn do_process_edge(&mut self, e: *mut u64) {
+    fn do_process_edge(&mut self, creator: usize, worker: usize, e: *mut u64) {
+        let is_visible_slot = creator == worker;
+        // if the slot is visible, it should already be done during object scanning
+        debug_assert!(!is_visible_slot);
         let edge_owner = self.get_owner_thread(e as u64);
+        debug_assert_eq!(edge_owner, worker);
         let child = unsafe { *e };
         self.stats.slots += 1;
-        if child == 0 {
-            return;
+        if child != 0 {
+            let child_owner = self.get_owner_thread(child);
+            let is_child_visile = child_owner == edge_owner;
+            self.create_process_node_work(edge_owner, child_owner, child);
+            if is_child_visile {
+                self.stats.invisible_non_empty_slots_visible_child += 1;
+            } else {
+                self.stats.invisible_non_empty_slots_invisible_child += 1;
+            }
+        } else {
+            self.stats.invisible_empty_slots += 1;
         }
-        self.stats.non_empty_slots += 1;
-        let child_owner = self.get_owner_thread(child);
-        self.create_process_node_work(edge_owner, child_owner, child, false);
     }
 
     fn get_stride_start(&self, p: *mut u64) -> *mut u64 {
@@ -311,6 +364,7 @@ impl Analysis {
     }
 
     fn do_process_edges(&mut self, creator: usize, worker: usize, start: *mut u64, count: u64) {
+        let are_visible_slots = creator == worker;
         // trace!("PE worker {} start 0x{:x} count {}", worker, start as u64, count);
         let end = start.wrapping_add(count as usize);
         // Suppose owner shift is 3, i.e., each thread can only see individual words
@@ -342,9 +396,24 @@ impl Analysis {
                 self.stats.slots += 1;
                 let child = unsafe { *edge };
                 if child != 0 {
-                    self.stats.non_empty_slots += 1;
                     let child_owner = self.get_owner_thread(child);
-                    self.create_process_node_work(worker, child_owner, child, creator == worker);
+                    let is_child_visile = child_owner == worker;
+                    self.create_process_node_work(worker, child_owner, child);
+                    if are_visible_slots {
+                        if is_child_visile {
+                            self.stats.visible_non_empty_slots_visible_child += 1;
+                        } else {
+                            self.stats.visible_non_empty_slots_invisible_child += 1;
+                        }
+                    } else if is_child_visile {
+                        self.stats.invisible_non_empty_slots_visible_child += 1;
+                    } else {
+                        self.stats.invisible_non_empty_slots_invisible_child += 1;
+                    }
+                } else if are_visible_slots {
+                    self.stats.visible_empty_slots += 1;
+                } else {
+                    self.stats.invisible_empty_slots += 1;
                 }
                 edge = edge.wrapping_add(1);
             }
@@ -358,10 +427,13 @@ impl Analysis {
         for root in o.roots() {
             self.stats.slots += 1;
             if *root != 0 {
-                self.stats.non_empty_slots += 1;
+                self.stats.non_empty_root_slots += 1;
+                self.create_root_work(*root);
+            } else {
+                self.stats.empty_root_slots += 1;
             }
-            self.create_root_work(*root);
         }
+        // I don't think the OpenJDK heapdump gives any empty roots
         debug_assert_eq!(self.work_queue.len(), o.roots().len());
         while let Some(tagged_work) = self.work_queue.pop_front() {
             self.do_work::<O>(tagged_work);
@@ -375,33 +447,70 @@ impl Analysis {
             .collect();
         dist.sort_by_key(|(worker, _)| *worker);
         println!("============================ Tabulate Statistics ============================");
-        print!("works\tmessages\tobjects\tslots\tnon_empty_slots\tmsg.invisible_slot\tmsg.remote_child_local_edge\tmsg.remote_child_remote_edge");
+        print!(
+            "obj\t\
+            msg\tmsg.pn\tmsg.pe\tmsg.pes\t\
+            slots\tslots.vis.empty\tslots.vis.child.vis\tslots.vis.child.invis\t\
+            slots.invis.empty\tslots.invis.child.vis\tslots.invis.child.invis\t\
+            slots.root.empty\tslots.root.non_empty\t\
+            work"
+        );
         for (x, _) in &dist {
-            print!("\tworks.{}", x);
+            print!("\twork.{}", x);
         }
         println!();
         print!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-            self.stats.total_work,
-            self.stats.total_msgs,
+            "{}\t\
+            {}\t{}\t{}\t{}\t\
+            {}\t{}\t{}\t{}\t\
+            {}\t{}\t{}\t\
+            {}\t{}\t\
+            {}",
             self.stats.marked_objects,
+            self.stats.total_msgs,
+            self.stats.msg_process_node,
+            self.stats.msg_process_edge,
+            self.stats.msg_process_edges,
             self.stats.slots,
-            self.stats.non_empty_slots,
-            self.stats.msg_invisible_slot,
-            self.stats.msg_child_obj_not_owned_during_process_node,
-            self.stats.msg_child_obj_not_owned_during_process_edge
+            self.stats.visible_empty_slots,
+            self.stats.visible_non_empty_slots_visible_child,
+            self.stats.visible_non_empty_slots_invisible_child,
+            self.stats.invisible_empty_slots,
+            self.stats.invisible_non_empty_slots_visible_child,
+            self.stats.invisible_non_empty_slots_invisible_child,
+            self.stats.empty_root_slots,
+            self.stats.non_empty_root_slots,
+            self.stats.total_work
         );
         for (_, work_cnt) in &dist {
             print!("\t{}", work_cnt);
         }
         println!();
         println!("-------------------------- End Tabulate Statistics --------------------------");
-        if !self.group_slots {
-            assert_eq!(
-                self.stats.total_work,
-                self.stats.non_empty_slots + self.stats.msg_invisible_slot
-            );
-        }
+        debug_assert_eq!(
+            self.stats.slots,
+            self.stats.visible_empty_slots
+                + self.stats.visible_non_empty_slots_visible_child
+                + self.stats.visible_non_empty_slots_invisible_child
+                + self.stats.invisible_empty_slots
+                + self.stats.invisible_non_empty_slots_visible_child
+                + self.stats.invisible_non_empty_slots_invisible_child
+                + self.stats.non_empty_root_slots
+                + self.stats.empty_root_slots
+        );
+        debug_assert_eq!(
+            self.stats.total_msgs,
+            self.stats.msg_process_edge
+                + self.stats.msg_process_edges
+                + self.stats.msg_process_node
+        );
+        debug_assert_eq!(self.stats.total_work, self.stats.work_dist.values().sum());
+        // if !self.group_slots {
+        //     assert_eq!(
+        //         self.stats.total_work,
+        //         self.stats.non_empty_slots + self.stats.msg_invisible_slot
+        //     );
+        // }
         // for n in o.objects() {
         //     let header = Header::load(*n);
         //     if header.get_mark_byte() != 1 {
