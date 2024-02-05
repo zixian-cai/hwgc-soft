@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 import os
 
+# Argument will look like
+# ./scripts/runbms.py baseline /bin/true ../heapdumps/sampled/fop/heapdump.2.binpb.zst -o OpenJDK trace -t NodeObjref
 ROOT = Path(__file__).parent.parent.resolve()
 BUILDS = ROOT / "builds"
 
