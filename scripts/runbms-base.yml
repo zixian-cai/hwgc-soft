@@ -83,7 +83,6 @@ runtimes:
 benchmarks:
   heapdump:
     - avrora
-    - batik
     - biojava
     - cassandra
     - eclipse

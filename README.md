@@ -31,3 +31,6 @@ running runbms /path/to/results ./scripts/pgo-2.yml
 ```
 
 And then use `running runbms /path/to/results ./scripts/trace.yml` to understand how object models and tracing loops affect tracing performance.
+
+### Analyzing communication patterns
+`cargo build --release` and then copy `target/release/hwgc_soft` to `builds/`.
