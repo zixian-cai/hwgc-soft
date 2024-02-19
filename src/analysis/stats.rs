@@ -53,6 +53,7 @@ pub(super) struct AnalysisStats {
     pub(super) work_dist: HashMap<usize, u64>,
     /// Total objects marked
     pub(super) marked_objects: u64,
+    pub(super) los_objects: u64,
     /// Total number of inter-worker messages sent
     pub(super) total_msgs: u64,
     pub(super) msg_process_node: u64,
@@ -68,6 +69,11 @@ pub(super) struct AnalysisStats {
     pub(super) invisible_empty_slots: u64,
     pub(super) invisible_non_empty_slots_visible_child: u64,
     pub(super) invisible_non_empty_slots_invisible_child: u64,
+    pub(super) objarray_slots: u64,
+    pub(super) objarray_empty_slots: u64,
+    /// Object sizes
+    pub(super) total_object_size: u64,
+    pub(super) los_object_size: u64,
 }
 
 impl AnalysisStats {
@@ -80,11 +86,13 @@ impl AnalysisStats {
         dist.sort_by_key(|(worker, _)| *worker);
         println!("============================ Tabulate Statistics ============================");
         print!(
-            "obj\t\
+            "obj\tobj.los\t\
+            size\tsize.los\t\
             msg\tmsg.pn\tmsg.pe\tmsg.pes\t\
             slots\tslots.vis.empty\tslots.vis.child.vis\tslots.vis.child.invis\t\
             slots.invis.empty\tslots.invis.child.vis\tslots.invis.child.invis\t\
             slots.root.empty\tslots.root.non_empty\t\
+            slots.objarray\tslots.objarray.empty\t\
             work"
         );
         for (x, _) in &dist {
@@ -92,13 +100,18 @@ impl AnalysisStats {
         }
         println!();
         print!(
-            "{}\t\
+            "{}\t{}\t\
+            {}\t{}\t\
             {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t\
             {}\t{}\t\
+            {}\t{}\t\
             {}",
             self.marked_objects,
+            self.los_objects,
+            self.total_object_size,
+            self.los_object_size,
             self.total_msgs,
             self.msg_process_node,
             self.msg_process_edge,
@@ -112,6 +125,8 @@ impl AnalysisStats {
             self.invisible_non_empty_slots_invisible_child,
             self.empty_root_slots,
             self.non_empty_root_slots,
+            self.objarray_slots,
+            self.objarray_empty_slots,
             self.total_work
         );
         for (_, work_cnt) in &dist {

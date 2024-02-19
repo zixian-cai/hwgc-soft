@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::HeapDump;
 
 pub trait ObjectModel {
@@ -9,6 +11,9 @@ pub trait ObjectModel {
     fn roots(&self) -> &[u64];
     fn objects(&self) -> &[u64];
     fn reset(&mut self);
+    fn object_sizes(&self) -> &HashMap<u64, u64>;
+    #[allow(clippy::missing_safety_doc)]
+    unsafe fn is_objarray(o: u64) -> bool;
 }
 
 mod bidirectional;

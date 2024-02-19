@@ -11,6 +11,13 @@ pub use generated_src::*;
 
 use super::util::{dzmmap_noreplace, munmap};
 
+pub enum Space {
+    Immix,
+    Immortal,
+    Los,
+    Nonmoving,
+}
+
 impl HeapDump {
     pub fn from_binpb_zst(p: impl AsRef<Path>) -> Result<HeapDump> {
         let file = File::open(p)?;
@@ -34,5 +41,17 @@ impl HeapDump {
             munmap(s.start, (s.end - s.start) as usize)?;
         }
         Ok(())
+    }
+
+    pub fn get_space_type(o: u64) -> Space {
+        let space_mask: u64 = 0xe0000000000;
+        let space_shift: u64 = 41;
+        match (o & space_mask) >> space_shift {
+            1 => Space::Immix,
+            2 => Space::Immortal,
+            3 => Space::Los,
+            4 => Space::Nonmoving,
+            _ => unreachable!(),
+        }
     }
 }

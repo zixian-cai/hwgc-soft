@@ -360,6 +360,7 @@ lazy_static! {
 pub struct OpenJDKObjectModel<const AE: bool> {
     objects: Vec<u64>,
     roots: Vec<u64>,
+    object_sizes: HashMap<u64, u64>,
 }
 
 impl<const AE: bool> Default for OpenJDKObjectModel<AE> {
@@ -373,6 +374,7 @@ impl<const AE: bool> OpenJDKObjectModel<AE> {
         OpenJDKObjectModel {
             objects: vec![],
             roots: vec![],
+            object_sizes: HashMap::new(),
         }
     }
 }
@@ -382,6 +384,7 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
         OBJECT_MAPS.lock().unwrap().clear();
         self.roots.clear();
         self.objects.clear();
+        self.object_sizes.clear();
     }
 
     fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize {
@@ -445,6 +448,7 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
                     std::ptr::write::<u64>(e.slot as *mut u64, e.objref);
                 }
             }
+            self.object_sizes.insert(o.start, o.size);
         }
     }
 
@@ -463,5 +467,18 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
 
     fn objects(&self) -> &[u64] {
         &self.objects
+    }
+
+    fn object_sizes(&self) -> &HashMap<u64, u64> {
+        &self.object_sizes
+    }
+
+    unsafe fn is_objarray(o: u64) -> bool {
+        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        if tib_ptr.is_null() {
+            panic!("Object 0x{:x} has a null tib pointer", { o });
+        }
+        let tib: &Tib = &*tib_ptr;
+        matches!(tib.ttype, TibType::ObjArray)
     }
 }

@@ -11,6 +11,7 @@ pub struct BidirectionalObjectModel<const HEADER: bool> {
     forwarding: HashMap<u64, u64>,
     objects: Vec<u64>,
     roots: Vec<u64>,
+    object_sizes: HashMap<u64, u64>,
 }
 
 impl<const HEADER: bool> BidirectionalObjectModel<HEADER> {
@@ -19,6 +20,7 @@ impl<const HEADER: bool> BidirectionalObjectModel<HEADER> {
             forwarding: HashMap::new(),
             objects: vec![],
             roots: vec![],
+            object_sizes: HashMap::new(),
         }
     }
 }
@@ -177,6 +179,7 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
         self.objects.clear();
         self.forwarding.clear();
         self.roots.clear();
+        self.object_sizes.clear();
     }
 
     fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize {
@@ -270,6 +273,7 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
                 }
             }
             debug_assert_eq!(ref_cursor, object.start + object.size);
+            self.object_sizes.insert(new_start, object.size);
         }
     }
 
@@ -286,5 +290,18 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
 
     fn objects(&self) -> &[u64] {
         &self.objects
+    }
+
+    fn object_sizes(&self) -> &HashMap<u64, u64> {
+        &self.object_sizes
+    }
+
+    unsafe fn is_objarray(o: u64) -> bool {
+        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        if tib_ptr.is_null() {
+            panic!("Object 0x{:x} has a null tib pointer", { o });
+        }
+        let tib: &Tib = &*tib_ptr;
+        matches!(tib.ttype, TibType::ObjArray)
     }
 }

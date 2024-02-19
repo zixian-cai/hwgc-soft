@@ -1,4 +1,6 @@
-use crate::{object_model::Header, *};
+use std::collections::HashMap;
+
+use crate::{heapdump::Space, object_model::Header, *};
 
 #[allow(clippy::enum_variant_names)]
 enum Work {
@@ -102,7 +104,11 @@ impl super::Analysis {
 
 // Do work
 impl super::Analysis {
-    pub(super) fn do_work<O: ObjectModel>(&mut self, work: TaggedWork) {
+    pub(super) fn do_work<O: ObjectModel>(
+        &mut self,
+        work: TaggedWork,
+        object_sizes: &HashMap<u64, u64>,
+    ) {
         let inner_work = work.work;
         match inner_work {
             Work::ProcessEdges { start, count } => {
@@ -121,15 +127,15 @@ impl super::Analysis {
             }
             Work::ProcessNode(o) => {
                 if self.group_slots {
-                    self.do_process_node_grouped::<O>(o)
+                    self.do_process_node_grouped::<O>(o, object_sizes)
                 } else {
-                    self.do_process_node::<O>(o)
+                    self.do_process_node::<O>(o, object_sizes)
                 }
             }
         }
     }
 
-    fn do_process_node<O: ObjectModel>(&mut self, o: u64) {
+    fn do_process_node<O: ObjectModel>(&mut self, o: u64, object_sizes: &HashMap<u64, u64>) {
         debug_assert_ne!(o, 0);
         let mut header = Header::load(o);
         let mark_byte = header.get_mark_byte();
@@ -137,6 +143,11 @@ impl super::Analysis {
             return;
         }
         self.stats.marked_objects += 1;
+        let object_size = object_sizes.get(&o).unwrap();
+        self.stats.total_object_size += object_size;
+        if let Space::Los = HeapDump::get_space_type(o) {
+            self.stats.los_object_size += object_size;
+        }
         // mark the object
         header.set_mark_byte(1);
         header.store(o);
@@ -153,7 +164,21 @@ impl super::Analysis {
                     self.create_process_edge_work(object_owner, edge_owner, edge);
                 }
             }
-        })
+        });
+        // Objarray stats
+        let is_objarray = unsafe { O::is_objarray(o) };
+        if is_objarray {
+            O::scan_object(o, |e, repeat| {
+                for i in 0..repeat {
+                    let edge = e.wrapping_add(i as usize);
+                    self.stats.objarray_slots += 1;
+                    let child = unsafe { *edge };
+                    if child == 0 {
+                        self.stats.objarray_empty_slots += 1;
+                    }
+                }
+            });
+        }
     }
 
     fn do_visible_slot(&mut self, worker: usize, child: u64) {
@@ -171,7 +196,11 @@ impl super::Analysis {
         }
     }
 
-    fn do_process_node_grouped<O: ObjectModel>(&mut self, o: u64) {
+    fn do_process_node_grouped<O: ObjectModel>(
+        &mut self,
+        o: u64,
+        object_sizes: &HashMap<u64, u64>,
+    ) {
         debug_assert_ne!(o, 0);
         let mut header = Header::load(o);
         let mark_byte = header.get_mark_byte();
@@ -179,6 +208,12 @@ impl super::Analysis {
             return;
         }
         self.stats.marked_objects += 1;
+        let object_size = object_sizes.get(&o).unwrap();
+        self.stats.total_object_size += object_size;
+        if let Space::Los = HeapDump::get_space_type(o) {
+            self.stats.los_object_size += object_size;
+            self.stats.los_objects += 1;
+        }
         // mark the object
         header.set_mark_byte(1);
         header.store(o);

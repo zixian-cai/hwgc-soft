@@ -56,10 +56,11 @@ impl Analysis {
                 self.stats.empty_root_slots += 1;
             }
         }
+        let object_sizes = o.object_sizes();
         // I don't think the OpenJDK heapdump gives any empty roots
         debug_assert_eq!(self.work_queue.len(), o.roots().len());
         while let Some(tagged_work) = self.work_queue.pop_front() {
-            self.do_work::<O>(tagged_work);
+            self.do_work::<O>(tagged_work, object_sizes);
         }
         debug_assert!(self.work_queue.is_empty());
         // for n in o.objects() {
