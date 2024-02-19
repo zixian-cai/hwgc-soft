@@ -1,0 +1,23 @@
+# running runbms results ./scripts/analyze-fast.yml -p "pimgc-asplos-2025-los-objarray"
+
+includes:
+  - "./runbms-base.yml"
+
+overrides:
+  "invocations": 1
+
+modifiers:
+  group_slots:
+    type: ProgramArg
+    val: "--group-slots"
+  threads:
+    type: ProgramArg
+    val: "--log-num-threads {0}"
+  owner_shift:
+    type: ProgramArg
+    val: "--owner-shift {0}"
+
+# This for analyzing properties intrinsic to the workload that has nothing
+# to do with visibilities, such as objarrays and large objects,
+configs:
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-3|owner_shift-6"
