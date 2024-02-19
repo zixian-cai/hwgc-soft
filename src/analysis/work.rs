@@ -135,14 +135,19 @@ impl super::Analysis {
         }
     }
 
-    fn do_los_object_stats(&mut self, o: u64, object_size: u64) {
+    fn do_los_object_stats<O: ObjectModel>(&mut self, o: u64, object_size: u64) {
         if let Space::Los = HeapDump::get_space_type(o) {
             self.stats.los_object_size += object_size;
             self.stats.los_objects += 1;
+            let is_objarray = unsafe { O::is_objarray(o) };
+            if is_objarray {
+                self.stats.los_objarrays += 1;
+                self.stats.los_objarray_size += object_size
+            }
         }
     }
 
-    fn do_objarray_stats<O: ObjectModel>(&mut self, o: u64) {
+    fn do_objarray_slot_stats<O: ObjectModel>(&mut self, o: u64) {
         let is_objarray = unsafe { O::is_objarray(o) };
         if is_objarray {
             O::scan_object(o, |e, repeat| {
@@ -168,7 +173,7 @@ impl super::Analysis {
         self.stats.marked_objects += 1;
         let object_size = object_sizes.get(&o).unwrap();
         self.stats.total_object_size += object_size;
-        self.do_los_object_stats(o, *object_size);
+        self.do_los_object_stats::<O>(o, *object_size);
         // mark the object
         header.set_mark_byte(1);
         header.store(o);
@@ -186,7 +191,7 @@ impl super::Analysis {
                 }
             }
         });
-        self.do_objarray_stats::<O>(o);
+        self.do_objarray_slot_stats::<O>(o);
     }
 
     fn do_visible_slot(&mut self, worker: usize, child: u64) {
@@ -218,7 +223,7 @@ impl super::Analysis {
         self.stats.marked_objects += 1;
         let object_size = object_sizes.get(&o).unwrap();
         self.stats.total_object_size += object_size;
-        self.do_los_object_stats(o, *object_size);
+        self.do_los_object_stats::<O>(o, *object_size);
         // mark the object
         header.set_mark_byte(1);
         header.store(o);
@@ -275,7 +280,7 @@ impl super::Analysis {
                 }
             }
         });
-        self.do_objarray_stats::<O>(o);
+        self.do_objarray_slot_stats::<O>(o);
     }
 
     fn do_process_edge(&mut self, creator: usize, worker: usize, e: *mut u64) {

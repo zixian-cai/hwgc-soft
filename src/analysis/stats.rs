@@ -54,6 +54,7 @@ pub(super) struct AnalysisStats {
     /// Total objects marked
     pub(super) marked_objects: u64,
     pub(super) los_objects: u64,
+    pub(super) los_objarrays: u64,
     /// Total number of inter-worker messages sent
     pub(super) total_msgs: u64,
     pub(super) msg_process_node: u64,
@@ -74,6 +75,7 @@ pub(super) struct AnalysisStats {
     /// Object sizes
     pub(super) total_object_size: u64,
     pub(super) los_object_size: u64,
+    pub(super) los_objarray_size: u64,
 }
 
 impl AnalysisStats {
@@ -86,8 +88,8 @@ impl AnalysisStats {
         dist.sort_by_key(|(worker, _)| *worker);
         println!("============================ Tabulate Statistics ============================");
         print!(
-            "obj\tobj.los\t\
-            size\tsize.los\t\
+            "obj\tobj.los\tobj.los.objarray\t\
+            size\tsize.los\tsize.los.objarray\t\
             msg\tmsg.pn\tmsg.pe\tmsg.pes\t\
             slots\tslots.vis.empty\tslots.vis.child.vis\tslots.vis.child.invis\t\
             slots.invis.empty\tslots.invis.child.vis\tslots.invis.child.invis\t\
@@ -100,8 +102,8 @@ impl AnalysisStats {
         }
         println!();
         print!(
-            "{}\t{}\t\
-            {}\t{}\t\
+            "{}\t{}\t{}\t\
+            {}\t{}\t{}\t\
             {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t\
@@ -110,8 +112,10 @@ impl AnalysisStats {
             {}",
             self.marked_objects,
             self.los_objects,
+            self.los_objarrays,
             self.total_object_size,
             self.los_object_size,
+            self.los_objarray_size,
             self.total_msgs,
             self.msg_process_node,
             self.msg_process_edge,
