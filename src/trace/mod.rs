@@ -18,6 +18,7 @@ pub enum TracingLoopChoice {
     EdgeObjref,
     NodeObjref,
     DistributedNodeObjref,
+    WPMMTk,
     WP,
 }
 
@@ -51,7 +52,7 @@ unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
-fn trace_object_atomic(o: u64, mark_sense: u8) -> bool {
+pub fn trace_object_atomic(o: u64, mark_sense: u8) -> bool {
     // mark sense is 1 intially, and flip every epoch
     // println!("Trace object: 0x{:x}", o as u64);
     debug_assert_ne!(o, 0);
@@ -64,12 +65,14 @@ mod edge_slot;
 mod node_objref;
 mod sanity;
 mod wp;
+mod wp_mmtk;
 
 use sanity::sanity_trace;
 
-fn prologue(l: TracingLoopChoice) {
+fn prologue<O: ObjectModel>(l: TracingLoopChoice) {
     match l {
-        TracingLoopChoice::WP => wp::prologue(),
+        TracingLoopChoice::WP => wp::prologue::<O>(),
+        TracingLoopChoice::WPMMTk => wp_mmtk::prologue::<O>(),
         _ => {}
     }
 }
@@ -98,6 +101,7 @@ fn transitive_closure<O: ObjectModel>(
                 )
             }
             TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
+            TracingLoopChoice::WPMMTk => wp_mmtk::transitive_closure(mark_sense, object_model),
         }
     };
     let elapsed = start.elapsed();
@@ -165,7 +169,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         }
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
-        prologue(trace_args.tracing_loop);
+        prologue::<O>(trace_args.tracing_loop);
         for i in 0..trace_args.iterations {
             mark_sense = (i % 2 == 0) as u8;
             let timed_stats =
