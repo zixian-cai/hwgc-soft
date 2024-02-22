@@ -51,6 +51,13 @@ unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
+fn trace_object_atomic(o: u64, mark_sense: u8) -> bool {
+    // mark sense is 1 intially, and flip every epoch
+    // println!("Trace object: 0x{:x}", o as u64);
+    debug_assert_ne!(o, 0);
+    Header::attempt_mark_byte(o, mark_sense)
+}
+
 mod distributed_node_objref;
 mod edge_objref;
 mod edge_slot;
@@ -59,6 +66,13 @@ mod sanity;
 mod wp;
 
 use sanity::sanity_trace;
+
+fn prologue(l: TracingLoopChoice) {
+    match l {
+        TracingLoopChoice::WP => wp::prologue(),
+        _ => {}
+    }
+}
 
 fn transitive_closure<O: ObjectModel>(
     l: TracingLoopChoice,
@@ -151,6 +165,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         }
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
+        prologue(trace_args.tracing_loop);
         for i in 0..trace_args.iterations {
             mark_sense = (i % 2 == 0) as u8;
             let timed_stats =
