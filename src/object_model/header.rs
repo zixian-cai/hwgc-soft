@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 #[repr(transparent)]
 pub struct Header(u64);

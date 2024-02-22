@@ -1,8 +1,8 @@
-use crossbeam::deque::{Injector, Steal, Stealer, Worker};
+use crossbeam::deque::{Steal, Stealer, Worker};
 use once_cell::sync::Lazy;
 use wp::{Object, Slot};
 
-use super::{trace_object, trace_object_atomic, TracingStats};
+use super::{trace_object_atomic, TracingStats};
 use crate::{ObjectModel, OpenJDKObjectModel};
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -47,7 +47,18 @@ impl ObjectOps for Object {
 //     // }
 // });
 
-fn run_worker(local: &Worker<Slot>, stealers: &[Stealer<Slot>]) {
+fn run_worker(id: usize, local: &Worker<Slot>, stealers: &[Stealer<Slot>]) {
+    // scan roots
+    if let Some(roots) = unsafe { ROOTS } {
+        let roots = unsafe { &*roots };
+        let range = (roots.len() * id) / N_WORKERS..(roots.len() * (id + 1)) / N_WORKERS;
+        for root in &roots[range] {
+            let slot = Slot(root as *const u64 as *mut u64);
+            local.push(slot);
+        }
+    }
+    BARRIER.wait();
+    // trace objects
     let (mut mo, mut s, mut nes) = (0, 0, 0);
     let mut process_slot = |slot: Slot| {
         s += 1;
@@ -67,7 +78,8 @@ fn run_worker(local: &Worker<Slot>, stealers: &[Stealer<Slot>]) {
         }
         // Steal from other workers
         for stealer in stealers {
-            match stealer.steal() {
+            // match stealer.steal() {
+            match stealer.steal_batch_and_pop(local) {
                 Steal::Success(slot) => {
                     process_slot(slot);
                     continue 'outer;
@@ -75,15 +87,6 @@ fn run_worker(local: &Worker<Slot>, stealers: &[Stealer<Slot>]) {
                 Steal::Retry => continue 'outer,
                 _ => {}
             }
-        }
-        // Steal from global
-        match INJECTOR.steal_batch_and_pop(&local) {
-            Steal::Success(slot) => {
-                process_slot(slot);
-                continue 'outer;
-            }
-            Steal::Retry => continue 'outer,
-            _ => {}
         }
         break;
     }
@@ -95,13 +98,14 @@ fn run_worker(local: &Worker<Slot>, stealers: &[Stealer<Slot>]) {
 
 static mut MARK_STATE: u8 = 0;
 static mut STEALERS: Vec<Stealer<Slot>> = Vec::new();
-static INJECTOR: Lazy<Injector<Slot>> = Lazy::new(|| Injector::new());
 
-const N_WORKERS: usize = 2;
+const N_WORKERS: usize = 32;
 static CVAR: Condvar = Condvar::new();
 static LOCK: Mutex<usize> = Mutex::new(0);
 static EPOCH: AtomicUsize = AtomicUsize::new(0);
 static BARRIER: Lazy<Barrier> = Lazy::new(|| Barrier::new(N_WORKERS));
+
+static mut ROOTS: Option<*const [u64]> = None;
 
 pub fn prologue() {
     let mut workers = vec![];
@@ -111,7 +115,7 @@ pub fn prologue() {
         workers.push(worker);
     }
     let mut handles = vec![];
-    for w in workers {
+    for (i, w) in workers.into_iter().enumerate() {
         let stealer = unsafe { &STEALERS };
         let handle = std::thread::spawn(move || loop {
             // wait for request
@@ -122,7 +126,7 @@ pub fn prologue() {
                 }
             }
             // Do GC
-            run_worker(&w, stealer);
+            run_worker(i, &w, stealer);
             // Update epoch
             {
                 if BARRIER.wait().is_leader() {
@@ -145,10 +149,8 @@ pub(super) unsafe fn transitive_closure<O: ObjectModel>(
     MARKED_OBJECTS.store(0, Ordering::SeqCst);
     SLOTS.store(0, Ordering::SeqCst);
     NON_EMPTY_SLOTS.store(0, Ordering::SeqCst);
-    // Create initial work
-    for root in object_model.roots() {
-        INJECTOR.push(Slot(root as *const u64 as *mut u64));
-    }
+    // Get roots
+    unsafe { ROOTS = Some(object_model.roots()) };
     // Wake up workers
     {
         let mut epoch = LOCK.lock().unwrap();
@@ -158,7 +160,6 @@ pub(super) unsafe fn transitive_closure<O: ObjectModel>(
             epoch = CVAR.wait(epoch).unwrap();
         }
     }
-    assert!(INJECTOR.is_empty());
     TracingStats {
         marked_objects: MARKED_OBJECTS.load(Ordering::SeqCst),
         slots: SLOTS.load(Ordering::SeqCst),
