@@ -1,3 +1,11 @@
 #!/usr/bin/env bash
 
-RUST_LOG=trace cargo run --features detailed_stats -- ./sampled/fop/heapdump.2.binpb.zst --object-model OpenJDK trace --tracing-loop EdgeSlot
+export RUST_LOG=trace
+
+features=detailed_stats
+object_model=OpenJDK
+tracing_loop=WP
+
+snapshop_files=./sampled/fop/heapdump.2.binpb.zst
+
+cargo run --features $features -- $snapshop_files --object-model $object_model trace --tracing-loop $tracing_loop

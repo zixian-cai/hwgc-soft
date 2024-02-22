@@ -1,14 +1,49 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+use std::sync::Mutex;
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct Slot(pub *mut u64);
+
+unsafe impl Send for Slot {}
+unsafe impl Sync for Slot {}
+
+impl Slot {
+    pub fn load(&self) -> Option<Object> {
+        let v = unsafe { *self.0 };
+        if v == 0 {
+            None
+        } else {
+            Some(Object(v))
+        }
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct Object(pub u64);
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+pub struct LocalQueue<T> {
+    data: Mutex<Vec<T>>,
+    handler: fn(&T),
+}
+
+impl<T> LocalQueue<T> {
+    pub const fn new(handler: fn(&T)) -> Self {
+        LocalQueue {
+            data: Mutex::new(Vec::new()),
+            handler,
+        }
+    }
+
+    pub fn push(&self, item: T) {
+        self.data.lock().unwrap().push(item);
+    }
+
+    pub fn pop(&self) -> Option<T> {
+        self.data.lock().unwrap().pop()
+    }
+
+    pub fn consume(&self) {
+        while let Some(data) = self.pop() {
+            (self.handler)(&data);
+        }
     }
 }

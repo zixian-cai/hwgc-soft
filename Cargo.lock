@@ -327,6 +327,7 @@ dependencies = [
  "log",
  "prost",
  "prost-build",
+ "wp",
  "zsim-hooks",
  "zstd",
 ]

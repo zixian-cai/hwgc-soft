@@ -18,6 +18,7 @@ pub enum TracingLoopChoice {
     EdgeObjref,
     NodeObjref,
     DistributedNodeObjref,
+    WP,
 }
 
 #[derive(Debug)]
@@ -55,6 +56,7 @@ mod edge_objref;
 mod edge_slot;
 mod node_objref;
 mod sanity;
+mod wp;
 
 use sanity::sanity_trace;
 
@@ -81,6 +83,7 @@ fn transitive_closure<O: ObjectModel>(
                     object_model,
                 )
             }
+            TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
         }
     };
     let elapsed = start.elapsed();
