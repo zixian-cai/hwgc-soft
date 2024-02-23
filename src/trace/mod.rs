@@ -34,7 +34,7 @@ pub struct TimedTracingStats {
     pub time: Duration,
 }
 
-unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
+pub(crate) unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     // mark sense is 1 intially, and flip every epoch
     // println!("Trace object: 0x{:x}", o as u64);
     debug_assert_ne!(o, 0);

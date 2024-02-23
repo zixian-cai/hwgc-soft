@@ -38,8 +38,15 @@ pub struct AnalysisArgs {
     pub(crate) group_slots: bool,
 }
 
+#[derive(Parser, Debug, Clone)]
+pub struct DepthArgs {
+    #[arg(long)]
+    pub(crate) output_file: String,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     Trace(TraceArgs),
     Analyze(AnalysisArgs),
+    Depth(DepthArgs),
 }
