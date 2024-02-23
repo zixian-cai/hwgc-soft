@@ -62,6 +62,9 @@ impl<O: ObjectModel> TracePacket<O> {
                 if o.mark(unsafe { MARK_STATE }) {
                     unsafe { LOCAL_OBJS += 1 };
                     o.scan_object::<O, _>(|s| {
+                        if self.next_slots.is_empty() {
+                            self.next_slots.reserve(Self::CAP);
+                        }
                         self.next_slots.push(s);
                         if self.next_slots.len() >= Self::CAP {
                             self.flush(&local);
@@ -93,6 +96,9 @@ fn run_worker<O: ObjectModel>(
         let mut buf = vec![];
         for root in &roots[range] {
             let slot = Slot(root as *const u64 as *mut u64);
+            if buf.is_empty() {
+                buf.reserve(TracePacket::<O>::CAP);
+            }
             buf.push(slot);
             if buf.len() >= TracePacket::<O>::CAP {
                 let packet = TracePacket::<O>::new(buf);
