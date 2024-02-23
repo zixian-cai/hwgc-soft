@@ -51,16 +51,22 @@ fn run_worker<O: ObjectModel>(id: usize, local: &Worker<Slot>, stealers: &[Steal
             process_slot(slot);
         }
         // Steal from other workers
+        let mut retry = false;
         for stealer in stealers {
-            // match stealer.steal() {
             match stealer.steal_batch_and_pop(local) {
                 Steal::Success(slot) => {
                     process_slot(slot);
                     continue 'outer;
                 }
-                Steal::Retry => continue 'outer,
+                Steal::Retry => {
+                    retry = true;
+                    continue;
+                }
                 _ => {}
             }
+        }
+        if retry {
+            continue;
         }
         break;
     }
