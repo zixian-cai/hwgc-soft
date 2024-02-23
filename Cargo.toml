@@ -38,3 +38,6 @@ built = { version = "0.7.1", features = ["git2"] }
 m5 = []
 zsim = []
 detailed_stats = []
+
+[profile.release]
+lto = true
