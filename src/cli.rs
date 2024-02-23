@@ -24,9 +24,9 @@ pub struct Args {
 #[derive(Parser, Debug, Clone, Copy)]
 pub struct TraceArgs {
     #[arg(short, long, value_enum)]
-    pub(crate) tracing_loop: TracingLoopChoice,
+    pub tracing_loop: TracingLoopChoice,
     #[arg(short, long, default_value_t = 5)]
-    pub(crate) iterations: usize,
+    pub iterations: usize,
 }
 #[derive(Parser, Debug, Clone, Copy)]
 pub struct AnalysisArgs {

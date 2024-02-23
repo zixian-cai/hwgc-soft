@@ -1,4 +1,7 @@
 #![feature(thread_local)]
+#![feature(test)]
+
+extern crate test;
 
 #[macro_use]
 extern crate lazy_static;
@@ -25,5 +28,5 @@ pub use crate::analysis::reified_analysis;
 pub use crate::cli::*;
 pub use crate::heapdump::{HeapDump, HeapObject, RootEdge};
 pub use crate::object_model::{BidirectionalObjectModel, ObjectModel, OpenJDKObjectModel};
-pub use crate::trace::reified_trace;
 pub use crate::trace::TracingLoopChoice;
+pub use crate::trace::{run_bench, reified_trace};

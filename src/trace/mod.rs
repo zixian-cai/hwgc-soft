@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use crate::cli::Commands;
 use crate::*;
 use anyhow::Result;
+use test::Bencher;
 #[cfg(feature = "zsim")]
 use zsim_hooks::*;
 
@@ -227,4 +228,129 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     );
     println!("-------------------------- End Tabulate Statistics --------------------------");
     Ok(())
+}
+
+pub fn bench_prepare<O: ObjectModel>(object_model: &mut O, args: &Args) -> Result<HeapDump> {
+    let trace_args = if let Some(Commands::Trace(a)) = args.command {
+        a
+    } else {
+        panic!("Incorrect dispatch");
+    };
+    assert!(args.paths.len() == 1);
+    let path = &args.paths[0];
+    // reset object model internal states
+    object_model.reset();
+    let heapdump = HeapDump::from_binpb_zst(path)?;
+    // mmap
+    heapdump.map_spaces()?;
+    // write objects to the heap
+    {
+        let start = Instant::now();
+        object_model.restore_objects(&heapdump);
+        let elapsed = start.elapsed();
+        info!(
+            "Finish deserializing the heapdump, {} objects in {} ms",
+            heapdump.objects.len(),
+            elapsed.as_micros() as f64 / 1000f64
+        );
+    }
+    // sanity check
+    {
+        if cfg!(debug_assertions) {
+            let sanity_traced_objects = sanity_trace(&heapdump);
+            info!(
+                "Sanity trace reporting {} reachable objects",
+                sanity_traced_objects
+            );
+            assert_eq!(sanity_traced_objects, heapdump.objects.len());
+        }
+    }
+    // main tracing loop
+    #[cfg(feature = "m5")]
+    unsafe {
+        m5::m5_reset_stats(0, 0);
+    }
+    #[cfg(feature = "zsim")]
+    zsim_roi_begin();
+    prologue::<O>(trace_args.tracing_loop);
+    Ok(heapdump)
+}
+
+pub fn bench_release<O: ObjectModel>(
+    object_model: &mut O,
+    iterations: usize,
+    heapdump: &HeapDump,
+) -> Result<()> {
+    #[cfg(feature = "m5")]
+    unsafe {
+        m5::m5_dump_reset_stats(0, 0);
+    }
+    #[cfg(feature = "zsim")]
+    zsim_roi_end();
+    let mark_sense = ((iterations - 1) % 2 == 0) as u8;
+    verify_mark(mark_sense, object_model);
+    heapdump.unmap_spaces()?;
+    Ok(())
+}
+
+pub fn bench_iter<O: ObjectModel>(
+    object_model: &mut O,
+    args: &Args,
+    iter: usize,
+    heapdump: &HeapDump,
+) -> Result<()> {
+    let trace_args = if let Some(Commands::Trace(a)) = args.command {
+        a
+    } else {
+        panic!("Incorrect dispatch");
+    };
+    let mark_sense = (iter % 2 == 0) as u8;
+    let timed_stats = transitive_closure(trace_args.tracing_loop, mark_sense, object_model);
+    let millis = timed_stats.time.as_micros() as f64 / 1000f64;
+    let stats = timed_stats.stats;
+    info!(
+        "Finished marking {} objects, and processing {} slots ({} non-empty) in {:.3} ms",
+        stats.marked_objects, stats.slots, stats.non_empty_slots, millis
+    );
+    info!(
+        "That is, {:.1} objects/ms, and {:.1} slots/ms ({:.1} non-empty/ms)",
+        stats.marked_objects as f64 / millis,
+        stats.slots as f64 / millis,
+        stats.non_empty_slots as f64 / millis
+    );
+    if stats.non_empty_slots != 0 {
+        info!(
+            "Total communication: {}, {:.1}% of non-empty slots",
+            stats.sends,
+            stats.sends as f64 / stats.non_empty_slots as f64 * 100f64
+        );
+    }
+    if cfg!(feature = "detailed_stats") {
+        debug_assert_eq!(stats.marked_objects as usize, heapdump.objects.len());
+    }
+    info!(
+        "Final iteration {} ms",
+        timed_stats.time.as_micros() as f64 / 1000f64
+    );
+    Ok(())
+}
+
+pub fn run_bench(b: &mut Bencher, trace: TracingLoopChoice, path: &str) {
+    let args = Args {
+        paths: vec![path.to_string()],
+        object_model: ObjectModelChoice::OpenJDK,
+        command: Some(Commands::Trace(TraceArgs {
+            tracing_loop: trace,
+            iterations: 5,
+        })),
+    };
+    let mut object_model = OpenJDKObjectModel::<false>::new();
+    let heapdump = bench_prepare(&mut object_model, &args).unwrap();
+
+    let mut iter = 0;
+    b.iter(|| {
+        bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
+        iter += 1;
+    });
+    bench_release(&mut object_model, iter, &heapdump).unwrap();
 }

@@ -4,7 +4,7 @@ export RUST_LOG=trace
 
 features=detailed_stats
 object_model=OpenJDK
-tracing_loop=WP
+tracing_loop=WPMMTk
 
 # snapshop_files=./sampled/fop/heapdump.2.binpb.zst
 snapshop_files=./sampled/pmd/heapdump.33.binpb.zst
