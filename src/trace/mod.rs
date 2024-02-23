@@ -297,7 +297,7 @@ pub fn bench_iter<O: ObjectModel>(
     object_model: &mut O,
     args: &Args,
     iter: usize,
-    heapdump: &HeapDump,
+    _heapdump: &HeapDump,
 ) -> Result<()> {
     let trace_args = if let Some(Commands::Trace(a)) = args.command {
         a
@@ -305,33 +305,27 @@ pub fn bench_iter<O: ObjectModel>(
         panic!("Incorrect dispatch");
     };
     let mark_sense = (iter % 2 == 0) as u8;
-    let timed_stats = transitive_closure(trace_args.tracing_loop, mark_sense, object_model);
-    let millis = timed_stats.time.as_micros() as f64 / 1000f64;
-    let stats = timed_stats.stats;
-    info!(
-        "Finished marking {} objects, and processing {} slots ({} non-empty) in {:.3} ms",
-        stats.marked_objects, stats.slots, stats.non_empty_slots, millis
-    );
-    info!(
-        "That is, {:.1} objects/ms, and {:.1} slots/ms ({:.1} non-empty/ms)",
-        stats.marked_objects as f64 / millis,
-        stats.slots as f64 / millis,
-        stats.non_empty_slots as f64 / millis
-    );
-    if stats.non_empty_slots != 0 {
-        info!(
-            "Total communication: {}, {:.1}% of non-empty slots",
-            stats.sends,
-            stats.sends as f64 / stats.non_empty_slots as f64 * 100f64
-        );
-    }
-    if cfg!(feature = "detailed_stats") {
-        debug_assert_eq!(stats.marked_objects as usize, heapdump.objects.len());
-    }
-    info!(
-        "Final iteration {} ms",
-        timed_stats.time.as_micros() as f64 / 1000f64
-    );
+    let _stats = unsafe {
+        match trace_args.tracing_loop {
+            TracingLoopChoice::EdgeObjref => {
+                edge_objref::transitive_closure_edge_objref(mark_sense, object_model)
+            }
+            TracingLoopChoice::EdgeSlot => {
+                edge_slot::transitive_closure_edge_slot(mark_sense, object_model)
+            }
+            TracingLoopChoice::NodeObjref => {
+                node_objref::transitive_closure_node_objref(mark_sense, object_model)
+            }
+            TracingLoopChoice::DistributedNodeObjref => {
+                distributed_node_objref::transitive_closure_distributed_node_objref(
+                    mark_sense,
+                    object_model,
+                )
+            }
+            TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
+            TracingLoopChoice::WPMMTk => wp_mmtk::transitive_closure(mark_sense, object_model),
+        }
+    };
     Ok(())
 }
 
