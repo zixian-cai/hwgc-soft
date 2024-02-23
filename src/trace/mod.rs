@@ -348,6 +348,10 @@ pub fn run_bench(b: &mut Bencher, trace: TracingLoopChoice, path: &str) {
     let heapdump = bench_prepare(&mut object_model, &args).unwrap();
 
     let mut iter = 0;
+
+    bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
+    iter += 1;
+
     b.iter(|| {
         bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
         iter += 1;
