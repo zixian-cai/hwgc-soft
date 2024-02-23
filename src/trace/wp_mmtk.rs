@@ -3,10 +3,14 @@ use once_cell::sync::Lazy;
 use wp::Slot;
 
 use super::TracingStats;
+use crate::util::ObjectOps;
 use crate::ObjectModel;
-use std::sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering},
-    Barrier, Condvar, Mutex,
+use std::{
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc, Barrier, Condvar, Mutex,
+    },
 };
 
 const N_WORKERS: usize = 32;
@@ -17,45 +21,102 @@ static EPOCH: AtomicUsize = AtomicUsize::new(0);
 static BARRIER: Lazy<Barrier> = Lazy::new(|| Barrier::new(N_WORKERS));
 
 static mut MARK_STATE: u8 = 0;
-static mut STEALERS: Vec<Stealer<Slot>> = Vec::new();
 static mut ROOTS: Option<*const [u64]> = None;
 
-fn run_worker<O: ObjectModel>(id: usize, local: &Worker<Slot>, stealers: &[Stealer<Slot>]) {
-    use crate::util::ObjectOps;
+#[thread_local]
+static mut LOCAL_OBJS: u64 = 0;
+#[thread_local]
+static mut LOCAL_EDGES: u64 = 0;
+#[thread_local]
+static mut LOCAL_NE_EDGES: u64 = 0;
+
+struct TracePacket<O: ObjectModel> {
+    slots: Vec<Slot>,
+    next_slots: Vec<Slot>,
+    _p: PhantomData<O>,
+}
+
+impl<O: ObjectModel> TracePacket<O> {
+    const CAP: usize = 512;
+
+    fn new(slots: Vec<Slot>) -> Self {
+        TracePacket {
+            slots,
+            next_slots: Vec::new(),
+            _p: PhantomData,
+        }
+    }
+
+    fn flush(&mut self, local: &Worker<TracePacket<O>>) {
+        if !self.next_slots.is_empty() {
+            let next = TracePacket::new(std::mem::take(&mut self.next_slots));
+            local.push(next);
+        }
+    }
+
+    fn run(&mut self, local: &Worker<TracePacket<O>>) {
+        let slots = std::mem::take(&mut self.slots);
+        for slot in slots {
+            unsafe { LOCAL_EDGES += 1 };
+            if let Some(o) = slot.load() {
+                if o.mark(unsafe { MARK_STATE }) {
+                    unsafe { LOCAL_OBJS += 1 };
+                    o.scan_object::<O, _>(|s| {
+                        self.next_slots.push(s);
+                        if self.next_slots.len() >= Self::CAP {
+                            self.flush(&local);
+                        }
+                    });
+                }
+            } else {
+                unsafe { LOCAL_NE_EDGES += 1 };
+            }
+        }
+        self.flush(&local);
+    }
+}
+
+fn run_worker<O: ObjectModel>(
+    id: usize,
+    local: &Worker<TracePacket<O>>,
+    stealers: &[Stealer<TracePacket<O>>],
+) {
+    unsafe {
+        LOCAL_NE_EDGES = 0;
+        LOCAL_EDGES = 0;
+        LOCAL_OBJS = 0
+    };
     // scan roots
     if let Some(roots) = unsafe { ROOTS } {
         let roots = unsafe { &*roots };
         let range = (roots.len() * id) / N_WORKERS..(roots.len() * (id + 1)) / N_WORKERS;
+        let mut buf = vec![];
         for root in &roots[range] {
             let slot = Slot(root as *const u64 as *mut u64);
-            local.push(slot);
+            buf.push(slot);
+            if buf.len() >= TracePacket::<O>::CAP {
+                let packet = TracePacket::<O>::new(buf);
+                local.push(packet);
+                buf = vec![];
+            }
+        }
+        if !buf.is_empty() {
+            let packet = TracePacket::<O>::new(buf);
+            local.push(packet);
         }
     }
     BARRIER.wait();
     // trace objects
-    let (mut mo, mut s, mut nes) = (0, 0, 0);
-    let mut process_slot = |slot: Slot| {
-        s += 1;
-        if let Some(o) = slot.load() {
-            if o.mark(unsafe { MARK_STATE }) {
-                mo += 1;
-                o.scan_object::<O, _>(|s| local.push(s));
-            }
-        } else {
-            nes += 1;
-        }
-    };
     'outer: loop {
         // Drain local queue
-        while let Some(slot) = local.pop() {
-            process_slot(slot);
+        while let Some(mut p) = local.pop() {
+            p.run(local);
         }
         // Steal from other workers
         for stealer in stealers {
-            // match stealer.steal() {
-            match stealer.steal_batch_and_pop(local) {
-                Steal::Success(slot) => {
-                    process_slot(slot);
+            match stealer.steal() {
+                Steal::Success(mut p) => {
+                    p.run(local);
                     continue 'outer;
                 }
                 Steal::Retry => continue 'outer,
@@ -65,21 +126,23 @@ fn run_worker<O: ObjectModel>(id: usize, local: &Worker<Slot>, stealers: &[Steal
         break;
     }
     assert!(local.is_empty());
-    SLOTS.fetch_add(s, Ordering::SeqCst);
-    MARKED_OBJECTS.fetch_add(mo, Ordering::SeqCst);
-    NON_EMPTY_SLOTS.fetch_add(nes, Ordering::SeqCst);
+    SLOTS.fetch_add(unsafe { LOCAL_EDGES }, Ordering::SeqCst);
+    MARKED_OBJECTS.fetch_add(unsafe { LOCAL_OBJS }, Ordering::SeqCst);
+    NON_EMPTY_SLOTS.fetch_add(unsafe { LOCAL_NE_EDGES }, Ordering::SeqCst);
 }
 
 pub fn prologue<O: ObjectModel>() {
     let mut workers = vec![];
+    let mut stealers = vec![];
     for _ in 0..N_WORKERS {
-        let worker = Worker::<Slot>::new_lifo();
-        unsafe { STEALERS.push(worker.stealer()) };
+        let worker = Worker::<TracePacket<O>>::new_lifo();
+        stealers.push(worker.stealer());
         workers.push(worker);
     }
+    let stealer_arc = Arc::new(stealers);
     let mut handles = vec![];
     for (i, w) in workers.into_iter().enumerate() {
-        let stealer = unsafe { &STEALERS };
+        let stealers = stealer_arc.clone();
         let handle = std::thread::spawn(move || loop {
             // wait for request
             {
@@ -89,7 +152,7 @@ pub fn prologue<O: ObjectModel>() {
                 }
             }
             // Do GC
-            run_worker::<O>(i, &w, stealer);
+            run_worker::<O>(i, &w, &stealers);
             // Update epoch
             {
                 if BARRIER.wait().is_leader() {

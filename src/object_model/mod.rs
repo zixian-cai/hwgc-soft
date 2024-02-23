@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::HeapDump;
 
-pub trait ObjectModel {
+pub trait ObjectModel: Send + Sync + 'static {
     fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize;
     fn restore_objects(&mut self, heapdump: &HeapDump);
     fn scan_object<F>(o: u64, callback: F)
