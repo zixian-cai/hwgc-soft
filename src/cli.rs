@@ -27,6 +27,8 @@ pub struct TraceArgs {
     pub(crate) tracing_loop: TracingLoopChoice,
     #[arg(short, long, default_value_t = 5)]
     pub(crate) iterations: usize,
+    #[arg(long, default_value_t = 16)]
+    pub(crate) shape_cache_size: usize,
 }
 #[derive(Parser, Debug, Clone, Copy)]
 pub struct AnalysisArgs {

@@ -18,14 +18,28 @@ pub enum TracingLoopChoice {
     EdgeObjref,
     NodeObjref,
     DistributedNodeObjref,
+    ShapeCache,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TracingStats {
     pub marked_objects: u64,
     pub slots: u64,
     pub non_empty_slots: u64,
     pub sends: u64,
+    pub shape_cache_hits: u64,
+    pub shape_cache_misses: u64,
+}
+
+impl TracingStats {
+    fn add(&mut self, other: &TracingStats) {
+        self.marked_objects += other.marked_objects;
+        self.slots += other.slots;
+        self.non_empty_slots += other.non_empty_slots;
+        self.sends += other.sends;
+        self.shape_cache_hits += other.shape_cache_hits;
+        self.shape_cache_misses += other.shape_cache_misses;
+    }
 }
 
 #[derive(Debug)]
@@ -55,15 +69,17 @@ mod edge_objref;
 mod edge_slot;
 mod node_objref;
 mod sanity;
+mod shape_cache;
 
 use sanity::sanity_trace;
 
 fn transitive_closure<O: ObjectModel>(
-    l: TracingLoopChoice,
+    args: TraceArgs,
     mark_sense: u8,
     object_model: &mut O,
 ) -> TimedTracingStats {
     let start: Instant = Instant::now();
+    let l = args.tracing_loop;
     let stats = unsafe {
         match l {
             TracingLoopChoice::EdgeObjref => {
@@ -80,6 +96,9 @@ fn transitive_closure<O: ObjectModel>(
                     mark_sense,
                     object_model,
                 )
+            }
+            TracingLoopChoice::ShapeCache => {
+                shape_cache::transitive_closure_shape_cache(args, mark_sense, object_model)
             }
         }
     };
@@ -107,10 +126,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     };
     let mut time = 0;
     let mut pauses = 0;
-    let mut marked_objects = 0;
-    let mut slots = 0;
-    let mut non_empty_slots = 0;
-    let mut sends = 0;
+    let mut total_stats: TracingStats = Default::default();
 
     for path in &args.paths {
         // reset object model internal states
@@ -148,10 +164,10 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         }
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
-        for i in 0..trace_args.iterations {
+        let iterations = trace_args.iterations;
+        for i in 0..iterations {
             mark_sense = (i % 2 == 0) as u8;
-            let timed_stats =
-                transitive_closure(trace_args.tracing_loop, mark_sense, &mut object_model);
+            let timed_stats = transitive_closure(trace_args, mark_sense, &mut object_model);
             let millis = timed_stats.time.as_micros() as f64 / 1000f64;
             let stats = timed_stats.stats;
             info!(
@@ -174,13 +190,10 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
             if cfg!(feature = "detailed_stats") {
                 debug_assert_eq!(stats.marked_objects as usize, heapdump.objects.len());
             }
-            if i == trace_args.iterations - 1 {
+            if i == iterations - 1 {
                 pauses += 1;
                 time += timed_stats.time.as_micros();
-                marked_objects += stats.marked_objects;
-                slots += stats.slots;
-                non_empty_slots += stats.non_empty_slots;
-                sends += stats.sends;
+                total_stats.add(&stats);
             }
             info!(
                 "Final iteration {} ms",
@@ -198,10 +211,17 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     }
 
     println!("============================ Tabulate Statistics ============================");
-    println!("pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends");
+    println!("pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends\tshape_cache.hits\tshape_cache.misses");
     println!(
-        "{}\t{}\t{}\t{}\t{}\t{}",
-        pauses, time, marked_objects, slots, non_empty_slots, sends
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        pauses,
+        time,
+        total_stats.marked_objects,
+        total_stats.slots,
+        total_stats.non_empty_slots,
+        total_stats.sends,
+        total_stats.shape_cache_hits,
+        total_stats.shape_cache_misses
     );
     println!("-------------------------- End Tabulate Statistics --------------------------");
     Ok(())

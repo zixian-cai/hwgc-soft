@@ -45,7 +45,7 @@ lazy_static! {
 
 #[repr(C)]
 #[derive(Debug)]
-struct Tib {
+pub struct Tib {
     ttype: TibType,
     num_refs: u64,
 }
@@ -101,7 +101,7 @@ impl Tib {
     where
         F: FnMut(*mut u64, u64),
     {
-        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        let tib_ptr = BidirectionalObjectModel::<false>::get_tib(o);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
         }
@@ -175,6 +175,8 @@ impl Tib {
 }
 
 impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
+    type Tib = Tib;
+
     fn reset(&mut self) {
         self.objects.clear();
         self.forwarding.clear();
@@ -297,11 +299,15 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
     }
 
     unsafe fn is_objarray(o: u64) -> bool {
-        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        let tib_ptr = Self::get_tib(o);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
         }
         let tib: &Tib = &*tib_ptr;
         matches!(tib.ttype, TibType::ObjArray)
+    }
+
+    fn get_tib(o: u64) -> *const Self::Tib {
+        unsafe { *((o as *mut u64).wrapping_add(1) as *const *const Tib) }
     }
 }

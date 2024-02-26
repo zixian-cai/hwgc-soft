@@ -51,6 +51,6 @@ pub(super) unsafe fn transitive_closure_node_objref<O: ObjectModel>(
         marked_objects,
         slots,
         non_empty_slots,
-        sends: 0,
+        ..Default::default()
     }
 }

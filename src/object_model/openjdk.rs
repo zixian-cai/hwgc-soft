@@ -13,7 +13,7 @@ lazy_static! {
 
 #[repr(C)]
 #[derive(Debug)]
-struct Tib {
+pub struct Tib {
     ttype: TibType,
     oop_map_blocks: Vec<OopMapBlock>,
     instance_mirror_info: Option<(u64, u64)>,
@@ -307,7 +307,7 @@ impl Tib {
     where
         F: FnMut(*mut u64, u64),
     {
-        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        let tib_ptr = OpenJDKObjectModel::<AE>::get_tib(o);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
         }
@@ -380,6 +380,8 @@ impl<const AE: bool> OpenJDKObjectModel<AE> {
 }
 
 impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
+    type Tib = Tib;
+
     fn reset(&mut self) {
         OBJECT_MAPS.lock().unwrap().clear();
         self.roots.clear();
@@ -474,11 +476,15 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
     }
 
     unsafe fn is_objarray(o: u64) -> bool {
-        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        let tib_ptr = Self::get_tib(o);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
         }
         let tib: &Tib = &*tib_ptr;
         matches!(tib.ttype, TibType::ObjArray)
+    }
+
+    fn get_tib(o: u64) -> *const Self::Tib {
+        unsafe { *((o as *mut u64).wrapping_add(1) as *const *const Tib) }
     }
 }

@@ -176,5 +176,6 @@ pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
         slots,
         non_empty_slots,
         sends,
+        ..Default::default()
     }
 }
