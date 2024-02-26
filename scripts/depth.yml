@@ -1,0 +1,21 @@
+# running runbms results ./scripts/depth.yml -p "pimgc-asplos-2025-depth"
+
+includes:
+  - "./runbms-base.yml"
+
+overrides:
+  "invocations": 1
+
+modifiers:
+  output_depth:
+    type: ProgramArg
+    val: "--output-file depth.parquet"
+
+plugins:
+  copy_depth_data:
+    type: CopyFile
+    patterns:
+      - "depth.parquet"
+
+configs:
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-depth|output_depth"
