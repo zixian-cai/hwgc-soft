@@ -5,14 +5,14 @@ extern crate test;
 use hwgc_soft::*;
 use test::Bencher;
 
-#[bench]
-fn pmd_edge_slot(b: &mut Bencher) {
-    run_bench(
-        b,
-        TracingLoopChoice::EdgeSlot,
-        "./sampled/pmd/heapdump.33.binpb.zst",
-    );
-}
+// #[bench]
+// fn pmd_edge_slot(b: &mut Bencher) {
+//     run_bench(
+//         b,
+//         TracingLoopChoice::EdgeSlot,
+//         "./sampled/pmd/heapdump.33.binpb.zst",
+//     );
+// }
 
 #[bench]
 fn pmd_crossbeam(b: &mut Bencher) {

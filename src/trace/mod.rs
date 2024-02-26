@@ -21,6 +21,7 @@ pub enum TracingLoopChoice {
     DistributedNodeObjref,
     WPMMTk,
     WP,
+    WP2,
 }
 
 #[derive(Debug)]
@@ -66,6 +67,7 @@ mod edge_slot;
 mod node_objref;
 mod sanity;
 mod wp;
+mod wp2;
 mod wp_mmtk;
 
 use sanity::sanity_trace;
@@ -73,6 +75,7 @@ use sanity::sanity_trace;
 fn prologue<O: ObjectModel>(l: TracingLoopChoice) {
     match l {
         TracingLoopChoice::WP => wp::prologue::<O>(),
+        TracingLoopChoice::WP2 => wp2::prologue::<O>(),
         TracingLoopChoice::WPMMTk => wp_mmtk::prologue::<O>(),
         _ => {}
     }
@@ -102,6 +105,7 @@ fn transitive_closure<O: ObjectModel>(
                 )
             }
             TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
+            TracingLoopChoice::WP2 => wp2::transitive_closure(mark_sense, object_model),
             TracingLoopChoice::WPMMTk => wp_mmtk::transitive_closure(mark_sense, object_model),
         }
     };
@@ -323,6 +327,7 @@ pub fn bench_iter<O: ObjectModel>(
                 )
             }
             TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
+            TracingLoopChoice::WP2 => wp2::transitive_closure(mark_sense, object_model),
             TracingLoopChoice::WPMMTk => wp_mmtk::transitive_closure(mark_sense, object_model),
         }
     };
