@@ -1,0 +1,28 @@
+# running runbms results ./scripts/shape_cache.yml -p "pimgc-asplos-2025-shape-cache"
+
+includes:
+  - "./runbms-base.yml"
+
+overrides:
+  "invocations": 1
+
+modifiers:
+  shape_cache_size:
+    type: ProgramArg
+    val: "--shape-cache-size {0}"
+
+
+configs:
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-1"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-2"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-4"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-8"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-16"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-32"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-64"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-128"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-256"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-512"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-1024"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-2048"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-4096"

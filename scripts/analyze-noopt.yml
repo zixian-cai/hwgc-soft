@@ -1,0 +1,42 @@
+includes:
+  - "./runbms-base.yml"
+
+overrides:
+  "invocations": 1
+
+modifiers:
+  group_slots:
+    type: ProgramArg
+    val: "--group-slots"
+  threads:
+    type: ProgramArg
+    val: "--log-num-threads {0}"
+  owner_shift:
+    type: ProgramArg
+    val: "--owner-shift {0}"
+
+configs:
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-3|owner_shift-6"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-3|owner_shift-6"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-2|owner_shift-6"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-2|owner_shift-6"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-1|owner_shift-6"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-1|owner_shift-6"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-3|owner_shift-8"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-3|owner_shift-8"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-2|owner_shift-8"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-2|owner_shift-8"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-1|owner_shift-8"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-1|owner_shift-8"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-3|owner_shift-10"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-3|owner_shift-10"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-2|owner_shift-10"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-2|owner_shift-10"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-1|owner_shift-10"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-1|owner_shift-10"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-3|owner_shift-12"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-3|owner_shift-12"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-2|owner_shift-12"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-2|owner_shift-12"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-1|owner_shift-12"
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-1|owner_shift-12"
