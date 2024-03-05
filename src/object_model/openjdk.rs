@@ -7,6 +7,8 @@ use std::mem::size_of;
 use std::ptr;
 use std::sync::Mutex;
 
+use super::{HasTibType, TibType};
+
 lazy_static! {
     static ref TIBS: Mutex<HashMap<u64, &'static Tib>> = Mutex::new(HashMap::new());
 }
@@ -17,6 +19,12 @@ pub struct Tib {
     ttype: TibType,
     oop_map_blocks: Vec<OopMapBlock>,
     instance_mirror_info: Option<(u64, u64)>,
+}
+
+impl HasTibType for Tib {
+    fn get_tib_type(&self) -> TibType {
+        self.ttype
+    }
 }
 
 #[repr(u8)]
@@ -52,14 +60,6 @@ impl From<u8> for AlignmentEncodingPattern {
             _ => unreachable!(),
         }
     }
-}
-
-#[repr(u8)]
-#[derive(Debug)]
-enum TibType {
-    Ordinary = 0,
-    ObjArray = 1,
-    InstanceMirror = 2,
 }
 
 struct AlignmentEncoding {}
@@ -486,5 +486,19 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
 
     fn get_tib(o: u64) -> *const Self::Tib {
         unsafe { *((o as *mut u64).wrapping_add(1) as *const *const Tib) }
+    }
+
+    fn tib_lookup_required(o: u64) -> bool {
+        if AE {
+            let tib_ptr = OpenJDKObjectModel::<AE>::get_tib(o);
+            if tib_ptr.is_null() {
+                panic!("Object 0x{:x} has a null tib pointer", { o });
+            }
+            let pattern = AlignmentEncoding::get_tib_code_for_region(tib_ptr as usize);
+            matches!(pattern, AlignmentEncodingPattern::Fallback)
+        } else {
+            // If alignment encoding is not used, tib lookup is always required
+            true
+        }
     }
 }
