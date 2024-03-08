@@ -1,11 +1,9 @@
 use clap::ValueEnum;
 
 use crate::object_model::Header;
-use crate::ObjectModel;
 
 use std::time::{Duration, Instant};
 
-use crate::cli::Commands;
 use crate::*;
 use anyhow::Result;
 use test::Bencher;
@@ -77,6 +75,15 @@ fn prologue<O: ObjectModel>(l: TracingLoopChoice) {
         TracingLoopChoice::WP => wp::prologue::<O>(),
         TracingLoopChoice::WP2 => wp2::prologue::<O>(),
         TracingLoopChoice::WPMMTk => wp_mmtk::prologue::<O>(),
+        _ => {}
+    }
+}
+
+fn epilogue<O: ObjectModel>(l: TracingLoopChoice) {
+    match l {
+        // TracingLoopChoice::WP => wp::prologue::<O>(),
+        // TracingLoopChoice::WP2 => wp2::prologue::<O>(),
+        TracingLoopChoice::WPMMTk => wp_mmtk::epilogue::<O>(),
         _ => {}
     }
 }
@@ -222,6 +229,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         zsim_roi_end();
         verify_mark(mark_sense, &mut object_model);
         heapdump.unmap_spaces()?;
+        epilogue::<O>(trace_args.tracing_loop);
     }
 
     println!("============================ Tabulate Statistics ============================");
@@ -282,9 +290,15 @@ pub fn bench_prepare<O: ObjectModel>(object_model: &mut O, args: &Args) -> Resul
 
 pub fn bench_release<O: ObjectModel>(
     object_model: &mut O,
+    args: &Args,
     iterations: usize,
     heapdump: &HeapDump,
 ) -> Result<()> {
+    let trace_args = if let Some(Commands::Trace(a)) = args.command {
+        a
+    } else {
+        panic!("Incorrect dispatch");
+    };
     #[cfg(feature = "m5")]
     unsafe {
         m5::m5_dump_reset_stats(0, 0);
@@ -294,6 +308,7 @@ pub fn bench_release<O: ObjectModel>(
     let mark_sense = ((iterations - 1) % 2 == 0) as u8;
     verify_mark(mark_sense, object_model);
     heapdump.unmap_spaces()?;
+    epilogue::<O>(trace_args.tracing_loop);
     Ok(())
 }
 
@@ -355,5 +370,5 @@ pub fn run_bench(b: &mut Bencher, trace: TracingLoopChoice, path: &str) {
         bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
         iter += 1;
     });
-    bench_release(&mut object_model, iter, &heapdump).unwrap();
+    bench_release(&mut object_model, &args, iter, &heapdump).unwrap();
 }
