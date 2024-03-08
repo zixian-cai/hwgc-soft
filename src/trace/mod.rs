@@ -18,10 +18,9 @@ pub enum TracingLoopChoice {
     NodeObjref,
     DistributedNodeObjref,
     ShapeCache,
-    WP,
-    WP2,
     WPEdgeSlot,
     WPEdgeSlotDual,
+    ParEdgeSlot,
 }
 
 #[derive(Debug, Default)]
@@ -65,21 +64,13 @@ pub(crate) unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
-pub fn trace_object_atomic(o: u64, mark_sense: u8) -> bool {
-    // mark sense is 1 intially, and flip every epoch
-    // println!("Trace object: 0x{:x}", o as u64);
-    debug_assert_ne!(o, 0);
-    Header::attempt_mark_byte(o, mark_sense)
-}
-
 mod distributed_node_objref;
 mod edge_objref;
 mod edge_slot;
 mod node_objref;
+mod par_edge_slot;
 mod sanity;
 mod shape_cache;
-mod wp;
-mod wp2;
 mod wp_edge_slot;
 mod wp_edge_slot_dual;
 
@@ -93,6 +84,7 @@ fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>>
     match args.tracing_loop {
         TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
         TracingLoopChoice::WPEdgeSlotDual => Some(wp_edge_slot_dual::create_tracer::<O>(args)),
+        TracingLoopChoice::ParEdgeSlot => Some(par_edge_slot::create_tracer::<O>(args)),
         _ => None,
     }
 }
@@ -123,15 +115,15 @@ fn transitive_closure<O: ObjectModel>(
                     object_model,
                 )
             }
-            TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
-            TracingLoopChoice::WP2 => wp2::transitive_closure(mark_sense, object_model),
             TracingLoopChoice::ShapeCache => shape_cache::transitive_closure_shape_cache(
                 args,
                 mark_sense,
                 object_model,
                 shape_cache,
             ),
-            TracingLoopChoice::WPEdgeSlot | TracingLoopChoice::WPEdgeSlotDual => {
+            TracingLoopChoice::WPEdgeSlot
+            | TracingLoopChoice::WPEdgeSlotDual
+            | TracingLoopChoice::ParEdgeSlot => {
                 if let Some(tracer) = tracer {
                     tracer.trace(mark_sense, object_model)
                 } else {
