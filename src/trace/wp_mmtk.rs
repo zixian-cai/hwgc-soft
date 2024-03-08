@@ -1,4 +1,5 @@
 use crossbeam::deque::{Injector, Steal, Stealer, Worker};
+use once_cell::sync::Lazy;
 use wp::Slot;
 
 use super::TracingStats;
@@ -116,15 +117,14 @@ struct WPWorker {
 }
 
 impl crate::util::workers::Worker for WPWorker {
-    type Global = GlobalContext;
     type SharedWorker = Stealer<Box<dyn Packet>>;
 
-    fn new(id: usize, group: Weak<WorkerGroup<Self>>, global: Arc<Self::Global>) -> Self {
+    fn new(id: usize, group: Weak<WorkerGroup<Self>>) -> Self {
         Self {
             _id: id,
             queue: Worker::new_lifo(),
             group,
-            global,
+            global: GLOBAL.clone(),
             objs: 0,
             edges: 0,
             ne_edges: 0,
@@ -201,9 +201,10 @@ impl GlobalContext {
     }
 }
 
+static GLOBAL: Lazy<Arc<GlobalContext>> = Lazy::new(|| Arc::new(GlobalContext::new()));
+
 struct WPTracer<O: ObjectModel> {
     group: Arc<WorkerGroup<WPWorker>>,
-    global: Arc<GlobalContext>,
     _p: PhantomData<O>,
 }
 
@@ -213,8 +214,8 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
     }
 
     fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
-        self.global.reset();
-        self.global.mark_state.store(mark_sense, Ordering::SeqCst);
+        GLOBAL.reset();
+        GLOBAL.mark_state.store(mark_sense, Ordering::SeqCst);
         // Get roots
         let roots = object_model.roots();
         let roots_len = roots.len();
@@ -226,14 +227,14 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
                 range,
                 _p: PhantomData,
             };
-            self.global.queue.push(Box::new(packet));
+            GLOBAL.queue.push(Box::new(packet));
         }
         // Wake up workers
         self.group.run_epoch();
         TracingStats {
-            marked_objects: self.global.objs.load(Ordering::SeqCst),
-            slots: self.global.edges.load(Ordering::SeqCst),
-            non_empty_slots: self.global.ne_edges.load(Ordering::SeqCst),
+            marked_objects: GLOBAL.objs.load(Ordering::SeqCst),
+            slots: GLOBAL.edges.load(Ordering::SeqCst),
+            non_empty_slots: GLOBAL.ne_edges.load(Ordering::SeqCst),
             sends: 0,
         }
     }
@@ -245,10 +246,8 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
 
 impl<O: ObjectModel> WPTracer<O> {
     pub fn new() -> Self {
-        let global = Arc::new(GlobalContext::new());
         Self {
-            group: WorkerGroup::new(32, &global),
-            global: global,
+            group: WorkerGroup::new(32),
             _p: PhantomData,
         }
     }

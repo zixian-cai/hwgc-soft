@@ -1,9 +1,6 @@
-use std::{
-    cell::UnsafeCell,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Barrier, BarrierWaitResult, Condvar, Mutex, Weak,
-    },
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc, Barrier, BarrierWaitResult, Condvar, Mutex, Weak,
 };
 
 struct Monitor {
@@ -27,7 +24,6 @@ impl Monitor {
 }
 
 pub struct WorkerGroup<W: Worker> {
-    num_workers: usize,
     monitor: Arc<Monitor>,
     handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
     pub workers: Vec<W::SharedWorker>,
@@ -35,17 +31,16 @@ pub struct WorkerGroup<W: Worker> {
 }
 
 impl<W: Worker> WorkerGroup<W> {
-    pub fn new(num_workers: usize, global: &Arc<W::Global>) -> Arc<Self> {
+    pub fn new(num_workers: usize) -> Arc<Self> {
         Arc::new_cyclic(|w| {
             let mut workers = vec![];
             let mut shared = vec![];
             for i in 0..num_workers {
-                let worker = W::new(i, w.clone(), global.clone());
+                let worker = W::new(i, w.clone());
                 shared.push(worker.new_shared());
                 workers.push(worker);
             }
             Self {
-                num_workers,
                 monitor: Arc::new(Monitor::new(num_workers)),
                 handles: Mutex::new(Vec::new()),
                 workers: shared,
@@ -55,6 +50,7 @@ impl<W: Worker> WorkerGroup<W> {
     }
 
     /// Barrier synchronization
+    #[allow(unused)]
     pub fn sync(&self) -> BarrierWaitResult {
         self.monitor.barrier.wait()
     }
@@ -128,13 +124,11 @@ impl<W: Worker> WorkerGroup<W> {
 
 /// Private thread-local worker data
 pub trait Worker: Send + 'static + Sized {
-    /// The globally shared data
-    type Global: Send + Sync + 'static;
     /// The shared worker data
     type SharedWorker: Send + Sync + 'static;
 
     /// Create a new worker
-    fn new(id: usize, group: Weak<WorkerGroup<Self>>, global: Arc<Self::Global>) -> Self;
+    fn new(id: usize, group: Weak<WorkerGroup<Self>>) -> Self;
     /// Create a new shared worker
     fn new_shared(&self) -> Self::SharedWorker;
     /// Run an GC epoch
