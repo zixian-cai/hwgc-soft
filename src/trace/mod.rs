@@ -2,11 +2,9 @@ use clap::ValueEnum;
 
 use crate::object_model::Header;
 use crate::trace::shape_cache::ShapeLruCache;
-use crate::ObjectModel;
 
 use std::time::{Duration, Instant};
 
-use crate::cli::Commands;
 use crate::*;
 use anyhow::Result;
 #[cfg(feature = "zsim")]
@@ -20,9 +18,10 @@ pub enum TracingLoopChoice {
     NodeObjref,
     DistributedNodeObjref,
     ShapeCache,
-    WPMMTk,
     WP,
     WP2,
+    WPEdgeSlot,
+    WPEdgeSlotDual,
 }
 
 #[derive(Debug, Default)]
@@ -81,17 +80,19 @@ mod sanity;
 mod shape_cache;
 mod wp;
 mod wp2;
-mod wp_mmtk;
+mod wp_edge_slot;
+mod wp_edge_slot_dual;
 
 use self::util::tracer::Tracer;
 use sanity::sanity_trace;
 
 use self::shape_cache::ShapeCacheStats;
 
-fn create_tracer<O: ObjectModel>(l: TracingLoopChoice) -> Option<Box<dyn Tracer<O>>> {
-    // Only WPMMTk supports the tracer interface for now.
-    match l {
-        TracingLoopChoice::WPMMTk => Some(wp_mmtk::create_tracer::<O>()),
+fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>> {
+    // Only WPEdgeSlot supports the tracer interface for now.
+    match args.tracing_loop {
+        TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
+        TracingLoopChoice::WPEdgeSlotDual => Some(wp_edge_slot_dual::create_tracer::<O>(args)),
         _ => None,
     }
 }
@@ -124,19 +125,19 @@ fn transitive_closure<O: ObjectModel>(
             }
             TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
             TracingLoopChoice::WP2 => wp2::transitive_closure(mark_sense, object_model),
-            TracingLoopChoice::WPMMTk => {
-                if let Some(tracer) = tracer {
-                    tracer.trace(mark_sense, object_model)
-                } else {
-                    unreachable!()
-                }
-            }
             TracingLoopChoice::ShapeCache => shape_cache::transitive_closure_shape_cache(
                 args,
                 mark_sense,
                 object_model,
                 shape_cache,
             ),
+            TracingLoopChoice::WPEdgeSlot | TracingLoopChoice::WPEdgeSlotDual => {
+                if let Some(tracer) = tracer {
+                    tracer.trace(mark_sense, object_model)
+                } else {
+                    unreachable!()
+                }
+            }
         }
     };
     let elapsed = start.elapsed();
@@ -208,7 +209,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
         let iterations = trace_args.iterations;
-        let tracer = create_tracer::<O>(trace_args.tracing_loop);
+        let tracer = create_tracer::<O>(&trace_args);
         if let Some(tracer) = tracer.as_ref() {
             tracer.startup();
         }

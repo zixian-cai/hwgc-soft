@@ -21,6 +21,7 @@ pub struct Args {
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
+
 #[derive(Parser, Debug, Clone, Copy)]
 pub struct TraceArgs {
     #[arg(short, long, value_enum)]
@@ -29,7 +30,14 @@ pub struct TraceArgs {
     pub(crate) iterations: usize,
     #[arg(long, default_value_t = 16)]
     pub(crate) shape_cache_size: usize,
+    /// Number of worker threads to use, if the tracing loop supports parallelism.
+    #[arg(long, default_value_t = num_cpus::get())]
+    pub(crate) threads: usize,
+    /// Work Packet buffer capacity.
+    #[arg(long, default_value_t = 4096)]
+    pub(crate) wp_capacity: usize,
 }
+
 #[derive(Parser, Debug, Clone, Copy)]
 pub struct AnalysisArgs {
     #[arg(short, long, default_value_t = 6)]

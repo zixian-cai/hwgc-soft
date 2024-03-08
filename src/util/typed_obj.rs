@@ -1,4 +1,4 @@
-use crate::ObjectModel;
+use crate::{object_model::Header, ObjectModel};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub struct Slot(*mut u64);
@@ -7,10 +7,6 @@ unsafe impl Send for Slot {}
 unsafe impl Sync for Slot {}
 
 impl Slot {
-    pub fn raw(&self) -> *mut u64 {
-        self.0
-    }
-
     pub fn from_raw(ptr: *mut u64) -> Self {
         Slot(ptr)
     }
@@ -29,12 +25,8 @@ impl Slot {
 pub struct Object(u64);
 
 impl Object {
-    pub fn raw(&self) -> u64 {
+    fn raw(&self) -> u64 {
         self.0
-    }
-
-    pub fn from_raw(ptr: u64) -> Self {
-        Object(ptr)
     }
 
     pub fn scan<O: ObjectModel, F: FnMut(Slot)>(&self, mut f: F) {
@@ -47,6 +39,6 @@ impl Object {
     }
 
     pub fn mark(&self, mark_state: u8) -> bool {
-        crate::trace::trace_object_atomic(self.raw(), mark_state)
+        Header::attempt_mark_byte(self.raw(), mark_state)
     }
 }
