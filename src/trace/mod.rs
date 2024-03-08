@@ -6,9 +6,9 @@ use crate::ObjectModel;
 
 use std::time::{Duration, Instant};
 
+use crate::cli::Commands;
 use crate::*;
 use anyhow::Result;
-use test::Bencher;
 #[cfg(feature = "zsim")]
 use zsim_hooks::*;
 
@@ -78,25 +78,23 @@ mod edge_objref;
 mod edge_slot;
 mod node_objref;
 mod sanity;
+mod shape_cache;
 mod wp;
 mod wp2;
 mod wp_mmtk;
 
+use self::util::tracer::Tracer;
 use sanity::sanity_trace;
 
-use self::util::tracer::Tracer;
+use self::shape_cache::ShapeCacheStats;
 
 fn create_tracer<O: ObjectModel>(l: TracingLoopChoice) -> Option<Box<dyn Tracer<O>>> {
+    // Only WPMMTk supports the tracer interface for now.
     match l {
-        // TracingLoopChoice::WP => wp::prologue::<O>(),
-        // TracingLoopChoice::WP2 => wp2::prologue::<O>(),
         TracingLoopChoice::WPMMTk => Some(wp_mmtk::create_tracer::<O>()),
         _ => None,
     }
 }
-mod shape_cache;
-
-use self::shape_cache::ShapeCacheStats;
 
 fn transitive_closure<O: ObjectModel>(
     args: TraceArgs,
@@ -209,13 +207,13 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         }
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
+        let iterations = trace_args.iterations;
         let tracer = create_tracer::<O>(trace_args.tracing_loop);
         if let Some(tracer) = tracer.as_ref() {
             tracer.startup();
         }
-        for i in 0..trace_args.iterations {
+        for i in 0..iterations {
             mark_sense = (i % 2 == 0) as u8;
-
             let timed_stats = transitive_closure(
                 trace_args,
                 mark_sense,
@@ -245,7 +243,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
             if cfg!(feature = "detailed_stats") {
                 debug_assert_eq!(stats.marked_objects as usize, heapdump.objects.len());
             }
-            if i == trace_args.iterations - 1 {
+            if i == iterations - 1 {
                 pauses += 1;
                 time += timed_stats.time.as_micros();
                 // println!("{:?}", stats);
@@ -395,7 +393,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
 //     Ok(())
 // }
 
-pub fn run_bench(_b: &mut Bencher, _trace: TracingLoopChoice, _path: &str) {
+pub fn run_bench(_b: &mut test::Bencher, _trace: TracingLoopChoice, _path: &str) {
     unimplemented!()
     //     let args = Args {
     //         paths: vec![path.to_string()],

@@ -14,7 +14,7 @@ pub trait HasTibType {
     fn get_tib_type(&self) -> TibType;
 }
 
-pub trait ObjectModel: Send + Sync + 'static {
+pub trait ObjectModel: Send + 'static {
     type Tib: HasTibType;
     fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize;
     fn restore_objects(&mut self, heapdump: &HeapDump);
