@@ -50,8 +50,8 @@ pub struct WPWorker {
     pub global: Arc<GlobalContext>,
     pub group: Weak<WorkerGroup<WPWorker>>,
     pub objs: u64,
-    pub edges: u64,
-    pub ne_edges: u64,
+    pub slots: u64,
+    pub ne_slots: u64,
 }
 
 impl crate::util::workers::Worker for WPWorker {
@@ -64,8 +64,8 @@ impl crate::util::workers::Worker for WPWorker {
             group,
             global: GLOBAL.clone(),
             objs: 0,
-            edges: 0,
-            ne_edges: 0,
+            slots: 0,
+            ne_slots: 0,
         }
     }
 
@@ -75,8 +75,8 @@ impl crate::util::workers::Worker for WPWorker {
 
     fn run_epoch(&mut self) {
         self.objs = 0;
-        self.edges = 0;
-        self.ne_edges = 0;
+        self.slots = 0;
+        self.ne_slots = 0;
         let group = self.group.upgrade().unwrap();
         // trace objects
         'outer: loop {
@@ -104,7 +104,7 @@ impl crate::util::workers::Worker for WPWorker {
         assert!(self.queue.is_empty());
         let global = &self.global;
         global.objs.fetch_add(self.objs, Ordering::SeqCst);
-        global.edges.fetch_add(self.edges, Ordering::SeqCst);
-        global.ne_edges.fetch_add(self.ne_edges, Ordering::SeqCst);
+        global.edges.fetch_add(self.slots, Ordering::SeqCst);
+        global.ne_edges.fetch_add(self.ne_slots, Ordering::SeqCst);
     }
 }

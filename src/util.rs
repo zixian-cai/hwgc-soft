@@ -1,6 +1,7 @@
 pub mod tracer;
 pub mod typed_obj;
 pub mod workers;
+pub mod wp;
 
 use anyhow::Result;
 

@@ -1,19 +1,16 @@
-mod wp;
-
 use crossbeam::deque::Worker;
 
 use super::TracingStats;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::Slot;
 use crate::util::workers::WorkerGroup;
+use crate::util::wp::{Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
 use std::ops::Range;
 use std::{
     marker::PhantomData,
     sync::{atomic::Ordering, Arc},
 };
-
-use wp::{Packet, WPWorker, GLOBAL};
 
 static mut ROOTS: Option<*const [u64]> = None;
 
@@ -47,7 +44,7 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
         let mark_state = local.global.mark_state();
         let slots = std::mem::take(&mut self.slots);
         for slot in slots {
-            local.edges += 1;
+            local.slots += 1;
             if let Some(o) = slot.load() {
                 if o.mark(mark_state) {
                     local.objs += 1;
@@ -62,7 +59,7 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
                     });
                 }
             } else {
-                local.ne_edges += 1;
+                local.ne_slots += 1;
             }
         }
         self.flush(&local.queue);
@@ -139,8 +136,7 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
             marked_objects: GLOBAL.objs.load(Ordering::SeqCst),
             slots: GLOBAL.edges.load(Ordering::SeqCst),
             non_empty_slots: GLOBAL.ne_edges.load(Ordering::SeqCst),
-            sends: 0,
-            shape_cache_stats: Default::default(),
+            ..Default::default()
         }
     }
 
