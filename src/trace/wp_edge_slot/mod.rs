@@ -24,7 +24,7 @@ impl<O: ObjectModel> TracePacket<O> {
     const CAP: usize = 512;
 
     fn new(slots: Vec<Slot>) -> Self {
-        TracePacket {
+        Self {
             slots,
             next_slots: Vec::new(),
             _p: PhantomData,
