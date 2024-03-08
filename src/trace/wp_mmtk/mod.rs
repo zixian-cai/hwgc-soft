@@ -1,11 +1,11 @@
 mod wp;
 
-use ::wp::Slot;
 use crossbeam::deque::Worker;
 
 use super::TracingStats;
 use crate::util::tracer::Tracer;
-use crate::util::{workers::WorkerGroup, ObjectOps};
+use crate::util::typed_obj::Slot;
+use crate::util::workers::WorkerGroup;
 use crate::ObjectModel;
 use std::ops::Range;
 use std::{
@@ -51,7 +51,7 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
             if let Some(o) = slot.load() {
                 if o.mark(mark_state) {
                     local.objs += 1;
-                    o.scan_object::<O, _>(|s| {
+                    o.scan::<O, _>(|s| {
                         if self.next_slots.is_empty() {
                             self.next_slots.reserve(Self::CAP);
                         }
@@ -91,7 +91,7 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
         };
         let roots = unsafe { &*roots };
         for root in &roots[self.range.clone()] {
-            let slot = Slot(root as *const u64 as *mut u64);
+            let slot = Slot::from_raw(root as *const u64 as *mut u64);
             if buf.is_empty() {
                 buf.reserve(TracePacket::<O>::CAP);
             }

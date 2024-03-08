@@ -328,7 +328,6 @@ dependencies = [
  "once_cell",
  "prost",
  "prost-build",
- "wp",
  "zsim-hooks",
  "zstd",
 ]

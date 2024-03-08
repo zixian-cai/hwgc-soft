@@ -1,8 +1,8 @@
 use crossbeam::deque::{Steal, Stealer, Worker};
 use once_cell::sync::Lazy;
-use wp::Slot;
 
 use super::TracingStats;
+use crate::util::typed_obj::Slot;
 use crate::ObjectModel;
 use std::sync::{
     atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -21,13 +21,12 @@ static mut STEALERS: Vec<Stealer<Slot>> = Vec::new();
 static mut ROOTS: Option<*const [u64]> = None;
 
 fn run_worker<O: ObjectModel>(id: usize, local: &Worker<Slot>, stealers: &[Stealer<Slot>]) {
-    use crate::util::ObjectOps;
     // scan roots
     if let Some(roots) = unsafe { ROOTS } {
         let roots = unsafe { &*roots };
         let range = (roots.len() * id) / N_WORKERS..(roots.len() * (id + 1)) / N_WORKERS;
         for root in &roots[range] {
-            let slot = Slot(root as *const u64 as *mut u64);
+            let slot = Slot::from_raw(root as *const u64 as *mut u64);
             local.push(slot);
         }
     }
@@ -39,7 +38,7 @@ fn run_worker<O: ObjectModel>(id: usize, local: &Worker<Slot>, stealers: &[Steal
         if let Some(o) = slot.load() {
             if o.mark(unsafe { MARK_STATE }) {
                 mo += 1;
-                o.scan_object::<O, _>(|s| local.push(s));
+                o.scan::<O, _>(|s| local.push(s));
             }
         } else {
             nes += 1;
