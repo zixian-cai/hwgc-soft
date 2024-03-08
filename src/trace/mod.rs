@@ -76,7 +76,7 @@ use sanity::sanity_trace;
 use self::shape_cache::ShapeCacheStats;
 
 fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>> {
-    // Only WPMMTk supports the tracer interface for now.
+    // Only WPEdgeSlot supports the tracer interface for now.
     match args.tracing_loop {
         TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
         _ => None,
