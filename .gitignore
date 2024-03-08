@@ -13,5 +13,7 @@ target/
 /.vscode
 /env
 /sampled
-*.log
-*.zip
+/results
+/*.log
+/*.zip
+/_*
