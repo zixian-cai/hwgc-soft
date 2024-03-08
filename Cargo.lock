@@ -786,6 +786,7 @@ dependencies = [
  "libc",
  "log",
  "lru",
+ "num_cpus",
  "once_cell",
  "polars",
  "prost",

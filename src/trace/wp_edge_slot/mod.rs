@@ -6,7 +6,7 @@ use super::TracingStats;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::Slot;
 use crate::util::workers::WorkerGroup;
-use crate::ObjectModel;
+use crate::{ObjectModel, TraceArgs};
 use std::ops::Range;
 use std::{
     marker::PhantomData,
@@ -116,6 +116,7 @@ struct WPTracer<O: ObjectModel> {
 
 impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
     fn startup(&self) {
+        info!("Use {} worker threads.", self.group.workers.len());
         self.group.spawn();
     }
 
@@ -149,14 +150,14 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
 }
 
 impl<O: ObjectModel> WPTracer<O> {
-    pub fn new() -> Self {
+    pub fn new(num_workers: usize) -> Self {
         Self {
-            group: WorkerGroup::new(32),
+            group: WorkerGroup::new(num_workers),
             _p: PhantomData,
         }
     }
 }
 
-pub fn create_tracer<O: ObjectModel>() -> Box<dyn Tracer<O>> {
-    Box::new(WPTracer::<O>::new())
+pub fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Box<dyn Tracer<O>> {
+    Box::new(WPTracer::<O>::new(args.threads))
 }

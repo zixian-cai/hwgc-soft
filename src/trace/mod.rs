@@ -75,10 +75,10 @@ use sanity::sanity_trace;
 
 use self::shape_cache::ShapeCacheStats;
 
-fn create_tracer<O: ObjectModel>(l: TracingLoopChoice) -> Option<Box<dyn Tracer<O>>> {
+fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>> {
     // Only WPMMTk supports the tracer interface for now.
-    match l {
-        TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>()),
+    match args.tracing_loop {
+        TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
         _ => None,
     }
 }
@@ -193,7 +193,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
         let iterations = trace_args.iterations;
-        let tracer = create_tracer::<O>(trace_args.tracing_loop);
+        let tracer = create_tracer::<O>(&trace_args);
         if let Some(tracer) = tracer.as_ref() {
             tracer.startup();
         }
