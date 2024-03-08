@@ -55,4 +55,5 @@ impl ObjectOps for Object {
     }
 }
 
+pub mod tracer;
 pub mod workers;

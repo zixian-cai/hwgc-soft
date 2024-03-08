@@ -70,21 +70,14 @@ mod wp_mmtk;
 
 use sanity::sanity_trace;
 
-fn prologue<O: ObjectModel>(l: TracingLoopChoice) {
-    match l {
-        TracingLoopChoice::WP => wp::prologue::<O>(),
-        TracingLoopChoice::WP2 => wp2::prologue::<O>(),
-        TracingLoopChoice::WPMMTk => wp_mmtk::prologue::<O>(),
-        _ => {}
-    }
-}
+use self::util::tracer::Tracer;
 
-fn epilogue<O: ObjectModel>(l: TracingLoopChoice) {
+fn create_tracer<O: ObjectModel>(l: TracingLoopChoice) -> Option<Box<dyn Tracer<O>>> {
     match l {
         // TracingLoopChoice::WP => wp::prologue::<O>(),
         // TracingLoopChoice::WP2 => wp2::prologue::<O>(),
-        TracingLoopChoice::WPMMTk => wp_mmtk::epilogue::<O>(),
-        _ => {}
+        TracingLoopChoice::WPMMTk => Some(wp_mmtk::create_tracer::<O>()),
+        _ => None,
     }
 }
 
@@ -92,6 +85,7 @@ fn transitive_closure<O: ObjectModel>(
     l: TracingLoopChoice,
     mark_sense: u8,
     object_model: &mut O,
+    tracer: Option<&Box<dyn Tracer<O>>>,
 ) -> TimedTracingStats {
     let start: Instant = Instant::now();
     let stats = unsafe {
@@ -113,7 +107,13 @@ fn transitive_closure<O: ObjectModel>(
             }
             TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
             TracingLoopChoice::WP2 => wp2::transitive_closure(mark_sense, object_model),
-            TracingLoopChoice::WPMMTk => wp_mmtk::transitive_closure(mark_sense, object_model),
+            TracingLoopChoice::WPMMTk => {
+                if let Some(tracer) = tracer {
+                    tracer.trace(mark_sense, object_model)
+                } else {
+                    unreachable!()
+                }
+            }
         }
     };
     let elapsed = start.elapsed();
@@ -181,11 +181,19 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         }
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
-        prologue::<O>(trace_args.tracing_loop);
+        let tracer = create_tracer::<O>(trace_args.tracing_loop);
+        if let Some(tracer) = tracer.as_ref() {
+            tracer.startup();
+        }
         for i in 0..trace_args.iterations {
             mark_sense = (i % 2 == 0) as u8;
-            let timed_stats =
-                transitive_closure(trace_args.tracing_loop, mark_sense, &mut object_model);
+
+            let timed_stats = transitive_closure(
+                trace_args.tracing_loop,
+                mark_sense,
+                &mut object_model,
+                tracer.as_ref(),
+            );
             let millis = timed_stats.time.as_micros() as f64 / 1000f64;
             let stats = timed_stats.stats;
             info!(
@@ -229,7 +237,9 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         zsim_roi_end();
         verify_mark(mark_sense, &mut object_model);
         heapdump.unmap_spaces()?;
-        epilogue::<O>(trace_args.tracing_loop);
+        if let Some(tracer) = tracer.as_ref() {
+            tracer.teardown();
+        }
     }
 
     println!("============================ Tabulate Statistics ============================");
@@ -242,133 +252,134 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     Ok(())
 }
 
-pub fn bench_prepare<O: ObjectModel>(object_model: &mut O, args: &Args) -> Result<HeapDump> {
-    let trace_args = if let Some(Commands::Trace(a)) = args.command {
-        a
-    } else {
-        panic!("Incorrect dispatch");
-    };
-    assert!(args.paths.len() == 1);
-    let path = &args.paths[0];
-    // reset object model internal states
-    object_model.reset();
-    let heapdump = HeapDump::from_binpb_zst(path)?;
-    // mmap
-    heapdump.map_spaces()?;
-    // write objects to the heap
-    {
-        let start = Instant::now();
-        object_model.restore_objects(&heapdump);
-        let elapsed = start.elapsed();
-        info!(
-            "Finish deserializing the heapdump, {} objects in {} ms",
-            heapdump.objects.len(),
-            elapsed.as_micros() as f64 / 1000f64
-        );
-    }
-    // sanity check
-    {
-        if cfg!(debug_assertions) {
-            let sanity_traced_objects = sanity_trace(&heapdump);
-            info!(
-                "Sanity trace reporting {} reachable objects",
-                sanity_traced_objects
-            );
-            assert_eq!(sanity_traced_objects, heapdump.objects.len());
-        }
-    }
-    // main tracing loop
-    #[cfg(feature = "m5")]
-    unsafe {
-        m5::m5_reset_stats(0, 0);
-    }
-    #[cfg(feature = "zsim")]
-    zsim_roi_begin();
-    prologue::<O>(trace_args.tracing_loop);
-    Ok(heapdump)
-}
+// pub fn bench_prepare<O: ObjectModel>(object_model: &mut O, args: &Args) -> Result<HeapDump> {
+//     let trace_args = if let Some(Commands::Trace(a)) = args.command {
+//         a
+//     } else {
+//         panic!("Incorrect dispatch");
+//     };
+//     assert!(args.paths.len() == 1);
+//     let path = &args.paths[0];
+//     // reset object model internal states
+//     object_model.reset();
+//     let heapdump = HeapDump::from_binpb_zst(path)?;
+//     // mmap
+//     heapdump.map_spaces()?;
+//     // write objects to the heap
+//     {
+//         let start = Instant::now();
+//         object_model.restore_objects(&heapdump);
+//         let elapsed = start.elapsed();
+//         info!(
+//             "Finish deserializing the heapdump, {} objects in {} ms",
+//             heapdump.objects.len(),
+//             elapsed.as_micros() as f64 / 1000f64
+//         );
+//     }
+//     // sanity check
+//     {
+//         if cfg!(debug_assertions) {
+//             let sanity_traced_objects = sanity_trace(&heapdump);
+//             info!(
+//                 "Sanity trace reporting {} reachable objects",
+//                 sanity_traced_objects
+//             );
+//             assert_eq!(sanity_traced_objects, heapdump.objects.len());
+//         }
+//     }
+//     // main tracing loop
+//     #[cfg(feature = "m5")]
+//     unsafe {
+//         m5::m5_reset_stats(0, 0);
+//     }
+//     #[cfg(feature = "zsim")]
+//     zsim_roi_begin();
+//     prologue::<O>(trace_args.tracing_loop);
+//     Ok(heapdump)
+// }
 
-pub fn bench_release<O: ObjectModel>(
-    object_model: &mut O,
-    args: &Args,
-    iterations: usize,
-    heapdump: &HeapDump,
-) -> Result<()> {
-    let trace_args = if let Some(Commands::Trace(a)) = args.command {
-        a
-    } else {
-        panic!("Incorrect dispatch");
-    };
-    #[cfg(feature = "m5")]
-    unsafe {
-        m5::m5_dump_reset_stats(0, 0);
-    }
-    #[cfg(feature = "zsim")]
-    zsim_roi_end();
-    let mark_sense = ((iterations - 1) % 2 == 0) as u8;
-    verify_mark(mark_sense, object_model);
-    heapdump.unmap_spaces()?;
-    epilogue::<O>(trace_args.tracing_loop);
-    Ok(())
-}
+// pub fn bench_release<O: ObjectModel>(
+//     object_model: &mut O,
+//     args: &Args,
+//     iterations: usize,
+//     heapdump: &HeapDump,
+// ) -> Result<()> {
+//     let trace_args = if let Some(Commands::Trace(a)) = args.command {
+//         a
+//     } else {
+//         panic!("Incorrect dispatch");
+//     };
+//     #[cfg(feature = "m5")]
+//     unsafe {
+//         m5::m5_dump_reset_stats(0, 0);
+//     }
+//     #[cfg(feature = "zsim")]
+//     zsim_roi_end();
+//     let mark_sense = ((iterations - 1) % 2 == 0) as u8;
+//     verify_mark(mark_sense, object_model);
+//     heapdump.unmap_spaces()?;
+//     epilogue::<O>(trace_args.tracing_loop);
+//     Ok(())
+// }
 
-pub fn bench_iter<O: ObjectModel>(
-    object_model: &mut O,
-    args: &Args,
-    iter: usize,
-    _heapdump: &HeapDump,
-) -> Result<()> {
-    let trace_args = if let Some(Commands::Trace(a)) = args.command {
-        a
-    } else {
-        panic!("Incorrect dispatch");
-    };
-    let mark_sense = (iter % 2 == 0) as u8;
-    let _stats = unsafe {
-        match trace_args.tracing_loop {
-            TracingLoopChoice::EdgeObjref => {
-                edge_objref::transitive_closure_edge_objref(mark_sense, object_model)
-            }
-            TracingLoopChoice::EdgeSlot => {
-                edge_slot::transitive_closure_edge_slot(mark_sense, object_model)
-            }
-            TracingLoopChoice::NodeObjref => {
-                node_objref::transitive_closure_node_objref(mark_sense, object_model)
-            }
-            TracingLoopChoice::DistributedNodeObjref => {
-                distributed_node_objref::transitive_closure_distributed_node_objref(
-                    mark_sense,
-                    object_model,
-                )
-            }
-            TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
-            TracingLoopChoice::WP2 => wp2::transitive_closure(mark_sense, object_model),
-            TracingLoopChoice::WPMMTk => wp_mmtk::transitive_closure(mark_sense, object_model),
-        }
-    };
-    Ok(())
-}
+// pub fn bench_iter<O: ObjectModel>(
+//     object_model: &mut O,
+//     args: &Args,
+//     iter: usize,
+//     _heapdump: &HeapDump,
+// ) -> Result<()> {
+//     let trace_args = if let Some(Commands::Trace(a)) = args.command {
+//         a
+//     } else {
+//         panic!("Incorrect dispatch");
+//     };
+//     let mark_sense = (iter % 2 == 0) as u8;
+//     let _stats = unsafe {
+//         match trace_args.tracing_loop {
+//             TracingLoopChoice::EdgeObjref => {
+//                 edge_objref::transitive_closure_edge_objref(mark_sense, object_model)
+//             }
+//             TracingLoopChoice::EdgeSlot => {
+//                 edge_slot::transitive_closure_edge_slot(mark_sense, object_model)
+//             }
+//             TracingLoopChoice::NodeObjref => {
+//                 node_objref::transitive_closure_node_objref(mark_sense, object_model)
+//             }
+//             TracingLoopChoice::DistributedNodeObjref => {
+//                 distributed_node_objref::transitive_closure_distributed_node_objref(
+//                     mark_sense,
+//                     object_model,
+//                 )
+//             }
+//             TracingLoopChoice::WP => wp::transitive_closure(mark_sense, object_model),
+//             TracingLoopChoice::WP2 => wp2::transitive_closure(mark_sense, object_model),
+//             TracingLoopChoice::WPMMTk => wp_mmtk::transitive_closure(mark_sense, object_model),
+//         }
+//     };
+//     Ok(())
+// }
 
-pub fn run_bench(b: &mut Bencher, trace: TracingLoopChoice, path: &str) {
-    let args = Args {
-        paths: vec![path.to_string()],
-        object_model: ObjectModelChoice::OpenJDK,
-        command: Some(Commands::Trace(TraceArgs {
-            tracing_loop: trace,
-            iterations: 5,
-        })),
-    };
-    let mut object_model = OpenJDKObjectModel::<false>::new();
-    let heapdump = bench_prepare(&mut object_model, &args).unwrap();
+pub fn run_bench(_b: &mut Bencher, _trace: TracingLoopChoice, _path: &str) {
+    unimplemented!()
+    //     let args = Args {
+    //         paths: vec![path.to_string()],
+    //         object_model: ObjectModelChoice::OpenJDK,
+    //         command: Some(Commands::Trace(TraceArgs {
+    //             tracing_loop: trace,
+    //             iterations: 5,
+    //         })),
+    //     };
+    //     let mut object_model = OpenJDKObjectModel::<false>::new();
+    //     let heapdump = bench_prepare(&mut object_model, &args).unwrap();
 
-    let mut iter = 0;
+    //     let mut iter = 0;
 
-    bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
-    iter += 1;
+    //     bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
+    //     iter += 1;
 
-    b.iter(|| {
-        bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
-        iter += 1;
-    });
-    bench_release(&mut object_model, &args, iter, &heapdump).unwrap();
+    //     b.iter(|| {
+    //         bench_iter(&mut object_model, &args, iter, &heapdump).unwrap();
+    //         iter += 1;
+    //     });
+    //     bench_release(&mut object_model, &args, iter, &heapdump).unwrap();
 }

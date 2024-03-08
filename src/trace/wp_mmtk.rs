@@ -1,8 +1,8 @@
 use crossbeam::deque::{Steal, Stealer, Worker};
-use once_cell::sync::Lazy;
 use wp::Slot;
 
 use super::TracingStats;
+use crate::util::tracer::Tracer;
 use crate::util::workers::Context;
 use crate::util::{workers::WorkerGroup, ObjectOps};
 use crate::ObjectModel;
@@ -18,9 +18,6 @@ use std::{
 const N_WORKERS: usize = 32;
 
 static mut ROOTS: Option<*const [u64]> = None;
-
-static WORKER_GROUP: Lazy<WorkerGroup<GlobalContext>> =
-    Lazy::new(|| WorkerGroup::new(32, GlobalContext::new()));
 
 struct TracePacket<O: ObjectModel> {
     slots: Vec<Slot>,
@@ -47,7 +44,7 @@ impl<O: ObjectModel> TracePacket<O> {
     }
 
     fn run(&mut self, local: &mut WPWorker<O>) {
-        let mark_state = WORKER_GROUP.shared.mark_state();
+        let mark_state = local.global.mark_state();
         let slots = std::mem::take(&mut self.slots);
         for slot in slots {
             local.edges += 1;
@@ -110,30 +107,35 @@ struct WPWorker<O: ObjectModel> {
     id: usize,
     worker: Worker<TracePacket<O>>,
     stealers: Arc<Vec<Stealer<TracePacket<O>>>>,
+    group: Arc<WorkerGroup>,
+    global: Arc<GlobalContext>,
     objs: u64,
     edges: u64,
     ne_edges: u64,
 }
 
 impl<O: ObjectModel> crate::util::workers::Worker for WPWorker<O> {
-    type Shared = Stealer<TracePacket<O>>;
+    type Global = GlobalContext;
+    type SharedWorker = Stealer<TracePacket<O>>;
 
-    fn new(id: usize) -> Self {
+    fn new(id: usize, group: Arc<WorkerGroup>, global: Arc<Self::Global>) -> Self {
         Self {
             id,
             worker: Worker::new_lifo(),
             stealers: Arc::new(vec![]),
+            global,
+            group,
             objs: 0,
             edges: 0,
             ne_edges: 0,
         }
     }
 
-    fn new_shared(&self) -> Self::Shared {
+    fn new_shared(&self) -> Self::SharedWorker {
         self.worker.stealer()
     }
 
-    fn init(&mut self, stealers: Arc<Vec<Self::Shared>>) {
+    fn init(&mut self, stealers: Arc<Vec<Self::SharedWorker>>) {
         self.stealers = stealers;
     }
 
@@ -164,7 +166,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for WPWorker<O> {
                 self.worker.push(packet);
             }
         }
-        WORKER_GROUP.sync();
+        self.group.sync();
         // trace objects
         'outer: loop {
             // Drain local queue
@@ -185,32 +187,54 @@ impl<O: ObjectModel> crate::util::workers::Worker for WPWorker<O> {
             break;
         }
         assert!(self.worker.is_empty());
-        let shared = &WORKER_GROUP.shared;
-        shared.objs.fetch_add(self.objs, Ordering::SeqCst);
-        shared.edges.fetch_add(self.edges, Ordering::SeqCst);
-        shared.ne_edges.fetch_add(self.ne_edges, Ordering::SeqCst);
+        let global = &self.global;
+        global.objs.fetch_add(self.objs, Ordering::SeqCst);
+        global.edges.fetch_add(self.edges, Ordering::SeqCst);
+        global.ne_edges.fetch_add(self.ne_edges, Ordering::SeqCst);
     }
 }
 
-pub fn prologue<O: ObjectModel>() {
-    WORKER_GROUP.spawn::<WPWorker<O>>();
+struct WPMMTkTracer<O: ObjectModel> {
+    group: Arc<WorkerGroup>,
+    global: Arc<GlobalContext>,
+    _p: PhantomData<O>,
 }
 
-pub fn transitive_closure<O: ObjectModel>(mark_sense: u8, object_model: &O) -> TracingStats {
-    WORKER_GROUP.shared.set_mark_state(mark_sense);
-    // Get roots
-    unsafe { ROOTS = Some(object_model.roots()) };
-    // Wake up workers
-    WORKER_GROUP.run_epoch();
-    let shared = &WORKER_GROUP.shared;
-    TracingStats {
-        marked_objects: shared.objs.load(Ordering::SeqCst),
-        slots: shared.edges.load(Ordering::SeqCst),
-        non_empty_slots: shared.ne_edges.load(Ordering::SeqCst),
-        sends: 0,
+impl<O: ObjectModel> Tracer<O> for WPMMTkTracer<O> {
+    fn startup(&self) {
+        self.group.spawn::<WPWorker<O>>(&self.global);
+    }
+
+    fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
+        self.global.set_mark_state(mark_sense);
+        // Get roots
+        unsafe { ROOTS = Some(object_model.roots()) };
+        // Wake up workers
+        self.group.run_epoch();
+        let global = &self.global;
+        TracingStats {
+            marked_objects: global.objs.load(Ordering::SeqCst),
+            slots: global.edges.load(Ordering::SeqCst),
+            non_empty_slots: global.ne_edges.load(Ordering::SeqCst),
+            sends: 0,
+        }
+    }
+
+    fn teardown(&self) {
+        self.group.finish();
     }
 }
 
-pub fn epilogue<O: ObjectModel>() {
-    WORKER_GROUP.finish();
+impl<O: ObjectModel> WPMMTkTracer<O> {
+    pub fn new() -> Self {
+        Self {
+            group: Arc::new(WorkerGroup::new(32)),
+            global: Arc::new(GlobalContext::new()),
+            _p: PhantomData,
+        }
+    }
+}
+
+pub fn create_tracer<O: ObjectModel>() -> Box<dyn Tracer<O>> {
+    Box::new(WPMMTkTracer::<O>::new())
 }

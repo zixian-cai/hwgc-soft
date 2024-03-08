@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc, Barrier, BarrierWaitResult, Condvar, Mutex,
+use std::{
+    cell::RefCell,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Barrier, BarrierWaitResult, Condvar, Mutex,
+    },
 };
 
 struct Monitor {
@@ -23,20 +26,23 @@ impl Monitor {
     }
 }
 
-pub struct WorkerGroup<Context> {
+pub struct WorkerGroup {
     num_workers: usize,
     monitor: Arc<Monitor>,
     handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
-    pub shared: Context,
+    global: RefCell<Option<Arc<dyn Context>>>,
 }
 
-impl<C: Context> WorkerGroup<C> {
-    pub fn new(num_workers: usize, context: C) -> Self {
+unsafe impl Send for WorkerGroup {}
+unsafe impl Sync for WorkerGroup {}
+
+impl WorkerGroup {
+    pub fn new(num_workers: usize) -> Self {
         Self {
             num_workers,
             monitor: Arc::new(Monitor::new(num_workers)),
             handles: Mutex::new(Vec::new()),
-            shared: context,
+            global: RefCell::new(None),
         }
     }
 
@@ -44,12 +50,14 @@ impl<C: Context> WorkerGroup<C> {
         self.monitor.barrier.wait()
     }
 
-    pub fn spawn<W: Worker>(&self) {
+    // Spawn workers
+    pub fn spawn<W: Worker>(self: &Arc<Self>, global: &Arc<W::Global>) {
+        self.global.replace(Some(global.clone()));
         let mut handles = self.handles.lock().unwrap();
         let mut workers = vec![];
         let mut shared = vec![];
         for i in 0..self.num_workers {
-            let worker = W::new(i);
+            let worker = W::new(i, self.clone(), global.clone());
             shared.push(worker.new_shared());
             workers.push(worker);
         }
@@ -87,8 +95,9 @@ impl<C: Context> WorkerGroup<C> {
         }
     }
 
+    // Run an GC epoch
     pub fn run_epoch(&self) {
-        self.shared.reset();
+        self.global.borrow().as_ref().unwrap().reset();
         // Wake up workers
         let mut epoch = self.monitor.lock.lock().unwrap();
         self.monitor.epoch.fetch_add(1, Ordering::SeqCst);
@@ -99,6 +108,7 @@ impl<C: Context> WorkerGroup<C> {
         }
     }
 
+    // Terminate workers
     pub fn finish(&self) {
         // Notify workers to finish
         let guard = self.monitor.lock.lock().unwrap();
@@ -119,10 +129,11 @@ impl<C: Context> WorkerGroup<C> {
 }
 
 pub trait Worker: Send + 'static {
-    type Shared: Send + Sync + 'static;
-    fn new(id: usize) -> Self;
-    fn new_shared(&self) -> Self::Shared;
-    fn init(&mut self, workers: Arc<Vec<Self::Shared>>);
+    type Global: Send + Sync + Context + 'static;
+    type SharedWorker: Send + Sync + 'static;
+    fn new(id: usize, group: Arc<WorkerGroup>, global: Arc<Self::Global>) -> Self;
+    fn new_shared(&self) -> Self::SharedWorker;
+    fn init(&mut self, workers: Arc<Vec<Self::SharedWorker>>);
     fn run_epoch(&mut self);
 }
 
