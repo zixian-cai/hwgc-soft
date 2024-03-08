@@ -30,4 +30,4 @@ pub use crate::cli::*;
 pub use crate::heapdump::{HeapDump, HeapObject, RootEdge};
 pub use crate::object_model::{BidirectionalObjectModel, ObjectModel, OpenJDKObjectModel};
 pub use crate::trace::TracingLoopChoice;
-pub use crate::trace::{run_bench, reified_trace};
+pub use crate::trace::{bench, reified_trace};
