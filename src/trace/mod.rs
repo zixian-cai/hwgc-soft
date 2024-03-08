@@ -1,6 +1,8 @@
 use clap::ValueEnum;
 
 use crate::object_model::Header;
+use crate::trace::shape_cache::ShapeLruCache;
+use crate::ObjectModel;
 
 use std::time::{Duration, Instant};
 
@@ -17,17 +19,29 @@ pub enum TracingLoopChoice {
     EdgeObjref,
     NodeObjref,
     DistributedNodeObjref,
+    ShapeCache,
     WPMMTk,
     WP,
     WP2,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TracingStats {
     pub marked_objects: u64,
     pub slots: u64,
     pub non_empty_slots: u64,
     pub sends: u64,
+    pub shape_cache_stats: ShapeCacheStats,
+}
+
+impl TracingStats {
+    fn add(&mut self, other: &TracingStats) {
+        self.marked_objects += other.marked_objects;
+        self.slots += other.slots;
+        self.non_empty_slots += other.non_empty_slots;
+        self.sends += other.sends;
+        self.shape_cache_stats.add(&other.shape_cache_stats);
+    }
 }
 
 #[derive(Debug)]
@@ -36,7 +50,7 @@ pub struct TimedTracingStats {
     pub time: Duration,
 }
 
-unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
+pub(crate) unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     // mark sense is 1 intially, and flip every epoch
     // println!("Trace object: 0x{:x}", o as u64);
     debug_assert_ne!(o, 0);
@@ -80,14 +94,19 @@ fn create_tracer<O: ObjectModel>(l: TracingLoopChoice) -> Option<Box<dyn Tracer<
         _ => None,
     }
 }
+mod shape_cache;
+
+use self::shape_cache::ShapeCacheStats;
 
 fn transitive_closure<O: ObjectModel>(
-    l: TracingLoopChoice,
+    args: TraceArgs,
     mark_sense: u8,
     object_model: &mut O,
+    shape_cache: &mut ShapeLruCache<O>,
     tracer: Option<&Box<dyn Tracer<O>>>,
 ) -> TimedTracingStats {
     let start: Instant = Instant::now();
+    let l = args.tracing_loop;
     let stats = unsafe {
         match l {
             TracingLoopChoice::EdgeObjref => {
@@ -114,6 +133,12 @@ fn transitive_closure<O: ObjectModel>(
                     unreachable!()
                 }
             }
+            TracingLoopChoice::ShapeCache => shape_cache::transitive_closure_shape_cache(
+                args,
+                mark_sense,
+                object_model,
+                shape_cache,
+            ),
         }
     };
     let elapsed = start.elapsed();
@@ -138,12 +163,15 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     } else {
         panic!("Incorrect dispatch");
     };
+
+    if trace_args.tracing_loop == TracingLoopChoice::ShapeCache && trace_args.iterations != 1 {
+        panic!("Only one iteration per heapdump is supported when doing shape cache analysis for avoiding warming up the shape cache");
+    }
     let mut time = 0;
     let mut pauses = 0;
-    let mut marked_objects = 0;
-    let mut slots = 0;
-    let mut non_empty_slots = 0;
-    let mut sends = 0;
+    let mut total_stats: TracingStats = Default::default();
+
+    let mut shape_cache: ShapeLruCache<O> = ShapeLruCache::new(trace_args.shape_cache_size);
 
     for path in &args.paths {
         // reset object model internal states
@@ -189,9 +217,10 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
             mark_sense = (i % 2 == 0) as u8;
 
             let timed_stats = transitive_closure(
-                trace_args.tracing_loop,
+                trace_args,
                 mark_sense,
                 &mut object_model,
+                &mut shape_cache,
                 tracer.as_ref(),
             );
             let millis = timed_stats.time.as_micros() as f64 / 1000f64;
@@ -219,10 +248,8 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
             if i == trace_args.iterations - 1 {
                 pauses += 1;
                 time += timed_stats.time.as_micros();
-                marked_objects += stats.marked_objects;
-                slots += stats.slots;
-                non_empty_slots += stats.non_empty_slots;
-                sends += stats.sends;
+                // println!("{:?}", stats);
+                total_stats.add(&stats);
             }
             info!(
                 "Final iteration {} ms",
@@ -243,10 +270,19 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     }
 
     println!("============================ Tabulate Statistics ============================");
-    println!("pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends");
     println!(
-        "{}\t{}\t{}\t{}\t{}\t{}",
-        pauses, time, marked_objects, slots, non_empty_slots, sends
+        "pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends\t{}",
+        total_stats.shape_cache_stats.get_stats_header()
+    );
+    println!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        pauses,
+        time,
+        total_stats.marked_objects,
+        total_stats.slots,
+        total_stats.non_empty_slots,
+        total_stats.sends,
+        total_stats.shape_cache_stats.get_stats_value()
     );
     println!("-------------------------- End Tabulate Statistics --------------------------");
     Ok(())

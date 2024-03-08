@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use crate::{HeapDump, HeapObject, ObjectModel};
 
-use super::Header;
+use super::{HasTibType, Header, TibType};
 
 pub struct BidirectionalObjectModel<const HEADER: bool> {
     forwarding: HashMap<u64, u64>,
@@ -45,16 +45,15 @@ lazy_static! {
 
 #[repr(C)]
 #[derive(Debug)]
-struct Tib {
+pub struct Tib {
     ttype: TibType,
     num_refs: u64,
 }
 
-#[repr(u8)]
-#[derive(Debug)]
-enum TibType {
-    Ordinary = 0,
-    ObjArray = 1,
+impl HasTibType for Tib {
+    fn get_tib_type(&self) -> TibType {
+        self.ttype
+    }
 }
 
 #[repr(u8)]
@@ -101,7 +100,7 @@ impl Tib {
     where
         F: FnMut(*mut u64, u64),
     {
-        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        let tib_ptr = BidirectionalObjectModel::<false>::get_tib(o);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
         }
@@ -113,6 +112,9 @@ impl Tib {
             }
             TibType::Ordinary => {
                 callback((o as *mut u64).wrapping_add(2), tib.num_refs);
+            }
+            TibType::InstanceMirror => {
+                unreachable!("Instance mirror shouldn't be necessary for bidirectional")
             }
         }
     }
@@ -169,12 +171,17 @@ impl Tib {
             TibType::ObjArray => {
                 header.set_byte(StatusByte::ObjArray as u8, Self::STATUS_BYTE_OFFSET);
             }
+            TibType::InstanceMirror => {
+                unreachable!("Instance mirror shouldn't be necessary for bidirectional")
+            }
         }
         header
     }
 }
 
 impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
+    type Tib = Tib;
+
     fn reset(&mut self) {
         self.objects.clear();
         self.forwarding.clear();
@@ -297,11 +304,29 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
     }
 
     unsafe fn is_objarray(o: u64) -> bool {
-        let tib_ptr = *((o as *mut u64).wrapping_add(1) as *const *const Tib);
+        let tib_ptr = Self::get_tib(o);
         if tib_ptr.is_null() {
             panic!("Object 0x{:x} has a null tib pointer", { o });
         }
         let tib: &Tib = &*tib_ptr;
         matches!(tib.ttype, TibType::ObjArray)
+    }
+
+    fn get_tib(o: u64) -> *const Self::Tib {
+        unsafe { *((o as *mut u64).wrapping_add(1) as *const *const Tib) }
+    }
+
+    fn tib_lookup_required(o: u64) -> bool {
+        if HEADER {
+            let header = Header::load(o);
+            let status_byte = header.get_byte(Tib::STATUS_BYTE_OFFSET);
+            // Too many refs, so the number of refs cannot be encoded in the
+            // header
+            status_byte == u8::MAX
+        } else {
+            // If the number of refs is not encoded in the header
+            // A tib lookup is always required
+            true
+        }
     }
 }

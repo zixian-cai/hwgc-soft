@@ -55,6 +55,7 @@ pub(super) struct AnalysisStats {
     pub(super) marked_objects: u64,
     pub(super) los_objects: u64,
     pub(super) los_objarrays: u64,
+    pub(super) completely_visible_objects: u64,
     /// Total number of inter-worker messages sent
     pub(super) total_msgs: u64,
     pub(super) msg_process_node: u64,
@@ -88,7 +89,7 @@ impl AnalysisStats {
         dist.sort_by_key(|(worker, _)| *worker);
         println!("============================ Tabulate Statistics ============================");
         print!(
-            "obj\tobj.los\tobj.los.objarray\t\
+            "obj\tobj.los\tobj.los.objarray\tobj.complete\t\
             size\tsize.los\tsize.los.objarray\t\
             msg\tmsg.pn\tmsg.pe\tmsg.pes\t\
             slots\tslots.vis.empty\tslots.vis.child.vis\tslots.vis.child.invis\t\
@@ -102,7 +103,7 @@ impl AnalysisStats {
         }
         println!();
         print!(
-            "{}\t{}\t{}\t\
+            "{}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t\
             {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t{}\t\
@@ -113,6 +114,7 @@ impl AnalysisStats {
             self.marked_objects,
             self.los_objects,
             self.los_objarrays,
+            self.completely_visible_objects,
             self.total_object_size,
             self.los_object_size,
             self.los_objarray_size,

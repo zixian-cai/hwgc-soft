@@ -24,6 +24,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
         match cmd {
             Commands::Trace(_) => reified_trace(object_model, args),
             Commands::Analyze(_) => reified_analysis(object_model, args),
+            Commands::Depth(_) => object_depth(object_model, args),
         }
     } else {
         Ok(())

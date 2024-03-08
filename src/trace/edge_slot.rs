@@ -55,6 +55,6 @@ pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
         marked_objects,
         slots,
         non_empty_slots,
-        sends: 0,
+        ..Default::default()
     }
 }

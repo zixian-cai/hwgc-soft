@@ -131,6 +131,7 @@ pub(super) unsafe fn transitive_closure<O: ObjectModel>(
         slots: SLOTS.load(Ordering::SeqCst),
         non_empty_slots: NON_EMPTY_SLOTS.load(Ordering::SeqCst),
         sends: 0,
+        shape_cache_stats: Default::default(),
     }
 }
 

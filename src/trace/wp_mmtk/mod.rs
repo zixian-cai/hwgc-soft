@@ -139,6 +139,7 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
             slots: GLOBAL.edges.load(Ordering::SeqCst),
             non_empty_slots: GLOBAL.ne_edges.load(Ordering::SeqCst),
             sends: 0,
+            shape_cache_stats: Default::default(),
         }
     }
 

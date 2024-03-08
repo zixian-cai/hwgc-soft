@@ -179,6 +179,7 @@ impl super::Analysis {
         header.store(o);
         // now we need to scan it
         let object_owner = self.get_owner_thread(o);
+        let mut completly_visible = true;
         O::scan_object(o, |e, repeat| {
             for i in 0..repeat {
                 let edge = e.wrapping_add(i as usize);
@@ -188,10 +189,15 @@ impl super::Analysis {
                     self.do_visible_slot(object_owner, child);
                 } else {
                     self.create_process_edge_work(object_owner, edge_owner, edge);
+                    completly_visible = false;
                 }
             }
         });
         self.do_objarray_slot_stats::<O>(o);
+        if completly_visible {
+            self.stats.completely_visible_objects += 1;
+            // println!("complete {:x}", o);
+        }
     }
 
     fn do_visible_slot(&mut self, worker: usize, child: u64) {
@@ -229,9 +235,19 @@ impl super::Analysis {
         header.store(o);
         // now we need to scan it
         let object_owner = self.get_owner_thread(o);
+        let mut completly_visible = true;
         // For each group of edges, we broadcast to all threads
         O::scan_object(o, |edge, repeat| {
+            // println!("0x{:x} {:?}*{}", o, edge, repeat);
+            // debug_assert_ne!(repeat, 0);
+            if repeat == 0 {
+                // Sometimes a group of 0 edge is reported
+                // because of 0 sized objarray for bidirectional/openjdk
+                // or 0 ref object for bidirectional fallback
+                return;
+            }
             if repeat == 1 {
+                // This group only has one edge
                 // A lightweight process
                 let edge_owner = self.get_owner_thread(edge as u64);
                 if edge_owner == object_owner {
@@ -239,14 +255,20 @@ impl super::Analysis {
                     self.do_visible_slot(object_owner, child);
                 } else {
                     self.create_process_edge_work(object_owner, edge_owner, edge);
+                    completly_visible = false;
                 }
                 return;
             }
+            // This group has more than one edges
             // A more heavyweight process
             let edge_owner = self.get_owner_thread(edge as u64);
             let stride_end = self.get_stride_end(edge);
             // We need to send something to the edge owner regardless
+            // println!("{}->{} {:?}*{}", object_owner, edge_owner, edge, repeat);
             self.create_process_edges_work(object_owner, edge_owner, edge, repeat);
+            if edge_owner != object_owner {
+                completly_visible = false;
+            }
             let ptrs_fit_in_1st_stride =
                 (stride_end as usize - edge as usize) >> self.log_pointer_size;
             // if repeat > 16 {
@@ -271,15 +293,35 @@ impl super::Analysis {
                     // if repeat > 16 {
                     //     dbg!(i % self.num_threads);
                     // }
-                    self.create_process_edges_work(
-                        object_owner,
-                        i % self.num_threads,
-                        edge,
-                        repeat,
-                    );
+                    let worker = i % self.num_threads;
+                    if worker != object_owner {
+                        completly_visible = false;
+                    }
+                    // println!("{}->{} {:?}*{}", object_owner, edge_owner, edge, repeat);
+                    self.create_process_edges_work(object_owner, worker, edge, repeat);
                 }
             }
         });
+        if completly_visible {
+            self.stats.completely_visible_objects += 1;
+        }
+        // Check whether do_process_node_grouped agrees with do_process_node
+        // in terms of completely visible objects
+        // else {
+        //     let mut completly_visible = true;
+        //     O::scan_object(o, |e, repeat| {
+        //         for i in 0..repeat {
+        //             let edge = e.wrapping_add(i as usize);
+        //             let edge_owner = self.get_owner_thread(edge as u64);
+        //             if edge_owner != object_owner {
+        //                 completly_visible = false;
+        //             }
+        //         }
+        //     });
+        //     if completly_visible {
+        //         panic!("Disagree!");
+        //     }
+        // }
         self.do_objarray_slot_stats::<O>(o);
     }
 

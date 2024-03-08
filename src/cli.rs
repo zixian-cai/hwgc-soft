@@ -26,7 +26,9 @@ pub struct TraceArgs {
     #[arg(short, long, value_enum)]
     pub tracing_loop: TracingLoopChoice,
     #[arg(short, long, default_value_t = 5)]
-    pub iterations: usize,
+    pub(crate) iterations: usize,
+    #[arg(long, default_value_t = 16)]
+    pub(crate) shape_cache_size: usize,
 }
 #[derive(Parser, Debug, Clone, Copy)]
 pub struct AnalysisArgs {
@@ -38,8 +40,15 @@ pub struct AnalysisArgs {
     pub(crate) group_slots: bool,
 }
 
+#[derive(Parser, Debug, Clone)]
+pub struct DepthArgs {
+    #[arg(long)]
+    pub(crate) output_file: String,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     Trace(TraceArgs),
     Analyze(AnalysisArgs),
+    Depth(DepthArgs),
 }

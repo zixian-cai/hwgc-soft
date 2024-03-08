@@ -24,6 +24,7 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
+pub use crate::analysis::depth::object_depth;
 pub use crate::analysis::reified_analysis;
 pub use crate::cli::*;
 pub use crate::heapdump::{HeapDump, HeapObject, RootEdge};

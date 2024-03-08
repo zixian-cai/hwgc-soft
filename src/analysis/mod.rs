@@ -7,6 +7,7 @@ mod work;
 use work::*;
 mod stats;
 use stats::*;
+pub(crate) mod depth;
 
 struct Analysis {
     owner_shift: usize,
