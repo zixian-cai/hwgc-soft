@@ -18,7 +18,7 @@ pub enum TracingLoopChoice {
     NodeObjref,
     DistributedNodeObjref,
     ShapeCache,
-    WPMMTk,
+    WPEdgeSlot,
 }
 
 #[derive(Debug, Default)]
@@ -68,7 +68,7 @@ mod edge_slot;
 mod node_objref;
 mod sanity;
 mod shape_cache;
-mod wp_mmtk;
+mod wp_edge_slot;
 
 use self::util::tracer::Tracer;
 use sanity::sanity_trace;
@@ -78,7 +78,7 @@ use self::shape_cache::ShapeCacheStats;
 fn create_tracer<O: ObjectModel>(l: TracingLoopChoice) -> Option<Box<dyn Tracer<O>>> {
     // Only WPMMTk supports the tracer interface for now.
     match l {
-        TracingLoopChoice::WPMMTk => Some(wp_mmtk::create_tracer::<O>()),
+        TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>()),
         _ => None,
     }
 }
@@ -115,7 +115,7 @@ fn transitive_closure<O: ObjectModel>(
                 object_model,
                 shape_cache,
             ),
-            TracingLoopChoice::WPMMTk => {
+            TracingLoopChoice::WPEdgeSlot => {
                 if let Some(tracer) = tracer {
                     tracer.trace(mark_sense, object_model)
                 } else {
