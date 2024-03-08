@@ -106,12 +106,12 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
     }
 }
 
-struct WPTracer<O: ObjectModel> {
+struct WPEdgeSlotTracer<O: ObjectModel> {
     group: Arc<WorkerGroup<WPWorker>>,
     _p: PhantomData<O>,
 }
 
-impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
+impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
     fn startup(&self) {
         info!("Use {} worker threads.", self.group.workers.len());
         self.group.spawn();
@@ -145,7 +145,7 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
     }
 }
 
-impl<O: ObjectModel> WPTracer<O> {
+impl<O: ObjectModel> WPEdgeSlotTracer<O> {
     pub fn new(num_workers: usize) -> Self {
         Self {
             group: WorkerGroup::new(num_workers),
@@ -155,5 +155,5 @@ impl<O: ObjectModel> WPTracer<O> {
 }
 
 pub fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Box<dyn Tracer<O>> {
-    Box::new(WPTracer::<O>::new(args.threads))
+    Box::new(WPEdgeSlotTracer::<O>::new(args.threads))
 }
