@@ -786,6 +786,7 @@ dependencies = [
  "libc",
  "log",
  "lru",
+ "once_cell",
  "polars",
  "prost",
  "prost-build",

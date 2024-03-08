@@ -2,11 +2,9 @@ use clap::ValueEnum;
 
 use crate::object_model::Header;
 use crate::trace::shape_cache::ShapeLruCache;
-use crate::ObjectModel;
 
 use std::time::{Duration, Instant};
 
-use crate::cli::Commands;
 use crate::*;
 use anyhow::Result;
 #[cfg(feature = "zsim")]
@@ -20,6 +18,7 @@ pub enum TracingLoopChoice {
     NodeObjref,
     DistributedNodeObjref,
     ShapeCache,
+    WPMMTk,
 }
 
 #[derive(Debug, Default)]
@@ -69,16 +68,27 @@ mod edge_slot;
 mod node_objref;
 mod sanity;
 mod shape_cache;
+mod wp_mmtk;
 
+use self::util::tracer::Tracer;
 use sanity::sanity_trace;
 
 use self::shape_cache::ShapeCacheStats;
+
+fn create_tracer<O: ObjectModel>(l: TracingLoopChoice) -> Option<Box<dyn Tracer<O>>> {
+    // Only WPMMTk supports the tracer interface for now.
+    match l {
+        TracingLoopChoice::WPMMTk => Some(wp_mmtk::create_tracer::<O>()),
+        _ => None,
+    }
+}
 
 fn transitive_closure<O: ObjectModel>(
     args: TraceArgs,
     mark_sense: u8,
     object_model: &mut O,
     shape_cache: &mut ShapeLruCache<O>,
+    tracer: Option<&Box<dyn Tracer<O>>>,
 ) -> TimedTracingStats {
     let start: Instant = Instant::now();
     let l = args.tracing_loop;
@@ -105,6 +115,13 @@ fn transitive_closure<O: ObjectModel>(
                 object_model,
                 shape_cache,
             ),
+            TracingLoopChoice::WPMMTk => {
+                if let Some(tracer) = tracer {
+                    tracer.trace(mark_sense, object_model)
+                } else {
+                    unreachable!()
+                }
+            }
         }
     };
     let elapsed = start.elapsed();
@@ -176,10 +193,19 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
         let iterations = trace_args.iterations;
+        let tracer = create_tracer::<O>(trace_args.tracing_loop);
+        if let Some(tracer) = tracer.as_ref() {
+            tracer.startup();
+        }
         for i in 0..iterations {
             mark_sense = (i % 2 == 0) as u8;
-            let timed_stats =
-                transitive_closure(trace_args, mark_sense, &mut object_model, &mut shape_cache);
+            let timed_stats = transitive_closure(
+                trace_args,
+                mark_sense,
+                &mut object_model,
+                &mut shape_cache,
+                tracer.as_ref(),
+            );
             let millis = timed_stats.time.as_micros() as f64 / 1000f64;
             let stats = timed_stats.stats;
             info!(
@@ -221,6 +247,9 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         zsim_roi_end();
         verify_mark(mark_sense, &mut object_model);
         heapdump.unmap_spaces()?;
+        if let Some(tracer) = tracer.as_ref() {
+            tracer.teardown();
+        }
     }
 
     println!("============================ Tabulate Statistics ============================");

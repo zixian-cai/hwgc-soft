@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU8, Ordering};
+
 #[repr(transparent)]
 pub struct Header(u64);
 
@@ -20,6 +22,16 @@ impl Header {
 
     pub fn set_mark_byte(&mut self, val: u8) {
         self.set_byte(val, 0);
+    }
+
+    pub fn attempt_mark_byte(o: u64, new_byte: u8) -> bool {
+        let old_byte = Header::load(o).get_mark_byte();
+        if old_byte == new_byte {
+            return false;
+        }
+        let work = unsafe { &*(o as *const u64 as *const AtomicU8) };
+        work.compare_exchange(old_byte, new_byte, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
     }
 
     pub fn get_byte(&self, offset: u8) -> u8 {
