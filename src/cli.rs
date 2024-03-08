@@ -33,6 +33,9 @@ pub struct TraceArgs {
     /// Number of worker threads to use, if the tracing loop supports parallelism.
     #[arg(long, default_value_t = num_cpus::get())]
     pub(crate) threads: usize,
+    /// Work Packet buffer capacity.
+    #[arg(long, default_value_t = 4096)]
+    pub(crate) wp_capacity: usize,
 }
 
 #[derive(Parser, Debug, Clone, Copy)]

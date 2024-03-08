@@ -21,8 +21,6 @@ struct TracePacket<O: ObjectModel> {
 }
 
 impl<O: ObjectModel> TracePacket<O> {
-    const CAP: usize = 512;
-
     fn new(slots: Vec<Slot>) -> Self {
         TracePacket {
             slots,
@@ -42,6 +40,7 @@ impl<O: ObjectModel> TracePacket<O> {
 
 impl<O: ObjectModel> Packet for TracePacket<O> {
     fn run(&mut self, local: &mut WPWorker) {
+        let capacity = GLOBAL.cap();
         let mark_state = local.global.mark_state();
         for slot in std::mem::take(&mut self.slots) {
             local.slots += 1;
@@ -49,10 +48,10 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
                 if o.mark(mark_state) {
                     local.objs += 1;
                     if self.next_objects.is_empty() {
-                        self.next_objects.reserve(Self::CAP);
+                        self.next_objects.reserve(capacity);
                     }
                     self.next_objects.push(o);
-                    if self.next_objects.len() >= Self::CAP {
+                    if self.next_objects.len() >= capacity {
                         self.flush(local);
                     }
                 } else {
@@ -71,8 +70,6 @@ struct ScanPacket<O: ObjectModel> {
 }
 
 impl<O: ObjectModel> ScanPacket<O> {
-    const CAP: usize = 512;
-
     fn new(objects: Vec<Object>) -> Self {
         Self {
             objects,
@@ -91,13 +88,14 @@ impl<O: ObjectModel> ScanPacket<O> {
 
 impl<O: ObjectModel> Packet for ScanPacket<O> {
     fn run(&mut self, local: &mut WPWorker) {
+        let capacity = GLOBAL.cap();
         for o in std::mem::take(&mut self.objects) {
             o.scan::<O, _>(|s| {
                 if self.next_slots.is_empty() {
-                    self.next_slots.reserve(Self::CAP);
+                    self.next_slots.reserve(capacity);
                 }
                 self.next_slots.push(s);
-                if self.next_slots.len() >= Self::CAP {
+                if self.next_slots.len() >= capacity {
                     self.flush(&local.queue);
                 }
             });
@@ -122,6 +120,7 @@ impl<O: ObjectModel> ScanRoots<O> {
 
 impl<O: ObjectModel> Packet for ScanRoots<O> {
     fn run(&mut self, local: &mut WPWorker) {
+        let capacity = GLOBAL.cap();
         let mut buf = vec![];
         let Some(roots) = (unsafe { ROOTS }) else {
             unreachable!()
@@ -130,10 +129,10 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
         for root in &roots[self.range.clone()] {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
             if buf.is_empty() {
-                buf.reserve(TracePacket::<O>::CAP);
+                buf.reserve(capacity);
             }
             buf.push(slot);
-            if buf.len() >= TracePacket::<O>::CAP {
+            if buf.len() >= capacity {
                 let packet = TracePacket::<O>::new(buf);
                 local.queue.push(Box::new(packet));
                 buf = vec![];
@@ -195,5 +194,6 @@ impl<O: ObjectModel> WPEdgeSlotDualTracer<O> {
 }
 
 pub fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Box<dyn Tracer<O>> {
+    GLOBAL.set_cap(args.wp_capacity);
     Box::new(WPEdgeSlotDualTracer::<O>::new(args.threads))
 }

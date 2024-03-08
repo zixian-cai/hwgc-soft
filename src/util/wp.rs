@@ -1,7 +1,7 @@
 use crate::util::workers::WorkerGroup;
 use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use once_cell::sync::Lazy;
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicU8, AtomicUsize};
 use std::sync::Weak;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -18,6 +18,7 @@ pub struct GlobalContext {
     pub objs: AtomicU64,
     pub edges: AtomicU64,
     pub ne_edges: AtomicU64,
+    pub cap: AtomicUsize,
 }
 
 impl GlobalContext {
@@ -28,7 +29,16 @@ impl GlobalContext {
             objs: AtomicU64::new(0),
             edges: AtomicU64::new(0),
             ne_edges: AtomicU64::new(0),
+            cap: AtomicUsize::new(4096),
         }
+    }
+
+    pub fn set_cap(&self, cap: usize) {
+        self.cap.store(cap, Ordering::SeqCst);
+    }
+
+    pub fn cap(&self) -> usize {
+        self.cap.load(Ordering::Relaxed)
     }
 
     pub fn mark_state(&self) -> u8 {
