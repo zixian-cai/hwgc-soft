@@ -1,27 +1,21 @@
-use crossbeam::deque::{Injector, Steal, Stealer, Worker};
-use once_cell::sync::Lazy;
-use wp::Slot;
+mod wp;
+
+use ::wp::Slot;
+use crossbeam::deque::Worker;
 
 use super::TracingStats;
 use crate::util::tracer::Tracer;
 use crate::util::{workers::WorkerGroup, ObjectOps};
 use crate::ObjectModel;
 use std::ops::Range;
-use std::sync::atomic::AtomicU8;
-use std::sync::Weak;
 use std::{
     marker::PhantomData,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::{atomic::Ordering, Arc},
 };
 
-static mut ROOTS: Option<*const [u64]> = None;
+use wp::{Packet, WPWorker, GLOBAL};
 
-trait Packet: Send {
-    fn run(&mut self, local: &mut WPWorker);
-}
+static mut ROOTS: Option<*const [u64]> = None;
 
 struct TracePacket<O: ObjectModel> {
     slots: Vec<Slot>,
@@ -80,6 +74,15 @@ struct ScanRoots<O: ObjectModel> {
     _p: PhantomData<O>,
 }
 
+impl<O: ObjectModel> ScanRoots<O> {
+    fn new(range: Range<usize>) -> Self {
+        ScanRoots {
+            range,
+            _p: PhantomData,
+        }
+    }
+}
+
 impl<O: ObjectModel> Packet for ScanRoots<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let mut buf = vec![];
@@ -106,103 +109,6 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
     }
 }
 
-struct WPWorker {
-    _id: usize,
-    queue: Worker<Box<dyn Packet>>,
-    global: Arc<GlobalContext>,
-    group: Weak<WorkerGroup<WPWorker>>,
-    objs: u64,
-    edges: u64,
-    ne_edges: u64,
-}
-
-impl crate::util::workers::Worker for WPWorker {
-    type SharedWorker = Stealer<Box<dyn Packet>>;
-
-    fn new(id: usize, group: Weak<WorkerGroup<Self>>) -> Self {
-        Self {
-            _id: id,
-            queue: Worker::new_lifo(),
-            group,
-            global: GLOBAL.clone(),
-            objs: 0,
-            edges: 0,
-            ne_edges: 0,
-        }
-    }
-
-    fn new_shared(&self) -> Self::SharedWorker {
-        self.queue.stealer()
-    }
-
-    fn run_epoch(&mut self) {
-        self.objs = 0;
-        self.edges = 0;
-        self.ne_edges = 0;
-        let group = self.group.upgrade().unwrap();
-        // trace objects
-        'outer: loop {
-            // Drain local queue
-            while let Some(mut p) = self.queue.pop() {
-                p.run(self);
-            }
-            // Steal from global queue
-            while let Steal::Success(mut p) = self.global.queue.steal() {
-                p.run(self);
-            }
-            // Steal from other workers
-            for stealer in &*group.workers {
-                match stealer.steal() {
-                    Steal::Success(mut p) => {
-                        p.run(self);
-                        continue 'outer;
-                    }
-                    Steal::Retry => continue 'outer,
-                    _ => {}
-                }
-            }
-            break;
-        }
-        assert!(self.queue.is_empty());
-        let global = &self.global;
-        global.objs.fetch_add(self.objs, Ordering::SeqCst);
-        global.edges.fetch_add(self.edges, Ordering::SeqCst);
-        global.ne_edges.fetch_add(self.ne_edges, Ordering::SeqCst);
-    }
-}
-
-struct GlobalContext {
-    queue: Injector<Box<dyn Packet>>,
-    mark_state: AtomicU8,
-    objs: AtomicU64,
-    edges: AtomicU64,
-    ne_edges: AtomicU64,
-}
-
-impl GlobalContext {
-    fn new() -> Self {
-        Self {
-            queue: Injector::new(),
-            mark_state: AtomicU8::new(0),
-            objs: AtomicU64::new(0),
-            edges: AtomicU64::new(0),
-            ne_edges: AtomicU64::new(0),
-        }
-    }
-
-    fn mark_state(&self) -> u8 {
-        self.mark_state.load(Ordering::Relaxed)
-    }
-
-    fn reset(&self) {
-        self.objs.store(0, Ordering::SeqCst);
-        self.edges.store(0, Ordering::SeqCst);
-        self.ne_edges.store(0, Ordering::SeqCst);
-    }
-}
-
-static GLOBAL: Lazy<Arc<GlobalContext>> = Lazy::new(|| Arc::new(GlobalContext::new()));
-
 struct WPTracer<O: ObjectModel> {
     group: Arc<WorkerGroup<WPWorker>>,
     _p: PhantomData<O>,
@@ -216,17 +122,14 @@ impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
     fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
         GLOBAL.reset();
         GLOBAL.mark_state.store(mark_sense, Ordering::SeqCst);
-        // Get roots
+        // Create initial root scanning packets
         let roots = object_model.roots();
         let roots_len = roots.len();
         unsafe { ROOTS = Some(roots) };
         let num_workers = self.group.workers.len();
         for id in 0..num_workers {
             let range = (roots_len * id) / num_workers..(roots_len * (id + 1)) / num_workers;
-            let packet = ScanRoots::<O> {
-                range,
-                _p: PhantomData,
-            };
+            let packet = ScanRoots::<O>::new(range);
             GLOBAL.queue.push(Box::new(packet));
         }
         // Wake up workers
