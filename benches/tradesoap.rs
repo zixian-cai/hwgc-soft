@@ -21,7 +21,7 @@ fn teardown() {
 }
 
 #[bench(startup=startup, teardown=teardown)]
-fn fop(b: &Bencher) {
+fn tradesoap(b: &Bencher) {
     let guard = CONTEXT.lock().unwrap();
     let context = guard.as_ref().unwrap();
     let mut stats = TracingStats::default();

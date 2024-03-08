@@ -15,10 +15,6 @@ crate-type = ["cdylib", "staticlib", "lib"]
 path = "src/main.rs"
 name = "hwgc_soft"
 
-[[bench]]
-name = "fop"
-harness = false
-
 [dependencies]
 prost = "0.11"
 zstd = "0.12"
@@ -53,6 +49,18 @@ detailed_stats = []
 
 [profile.release]
 # lto = true
+
+[[bench]]
+name = "fop"
+harness = false
+
+[[bench]]
+name = "pmd"
+harness = false
+
+[[bench]]
+name = "tradesoap"
+harness = false
 
 [package.metadata.harness.profiles.default]
 
