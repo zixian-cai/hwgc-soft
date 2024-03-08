@@ -53,3 +53,9 @@ detailed_stats = []
 
 [profile.release]
 # lto = true
+
+[package.metadata.harness.profiles.default]
+
+[package.metadata.harness.profiles.default.builds]
+wp_edge_slot = { env = { TRACING_LOOP = "WPEdgeSlot" } }
+wp_edge_slot_dual = { env = { TRACING_LOOP = "WPEdgeSlotDual" } }
