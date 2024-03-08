@@ -42,8 +42,7 @@ impl<O: ObjectModel> TracePacket<O> {
 impl<O: ObjectModel> Packet for TracePacket<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let mark_state = local.global.mark_state();
-        let slots = std::mem::take(&mut self.slots);
-        for slot in slots {
+        for slot in std::mem::take(&mut self.slots) {
             local.slots += 1;
             if let Some(o) = slot.load() {
                 if o.mark(mark_state) {
