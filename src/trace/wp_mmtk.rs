@@ -1,12 +1,13 @@
-use crossbeam::deque::{Steal, Stealer, Worker};
+use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use wp::Slot;
 
 use super::TracingStats;
 use crate::util::tracer::Tracer;
-use crate::util::workers::Context;
 use crate::util::{workers::WorkerGroup, ObjectOps};
 use crate::ObjectModel;
+use std::ops::Range;
 use std::sync::atomic::AtomicU8;
+use std::sync::Weak;
 use std::{
     marker::PhantomData,
     sync::{
@@ -15,9 +16,11 @@ use std::{
     },
 };
 
-const N_WORKERS: usize = 32;
-
 static mut ROOTS: Option<*const [u64]> = None;
+
+trait Packet: Send {
+    fn run(&mut self, local: &mut WPWorker);
+}
 
 struct TracePacket<O: ObjectModel> {
     slots: Vec<Slot>,
@@ -36,14 +39,16 @@ impl<O: ObjectModel> TracePacket<O> {
         }
     }
 
-    fn flush(&mut self, local: &Worker<TracePacket<O>>) {
+    fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
         if !self.next_slots.is_empty() {
-            let next = TracePacket::new(std::mem::take(&mut self.next_slots));
-            local.push(next);
+            let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots));
+            local.push(Box::new(next));
         }
     }
+}
 
-    fn run(&mut self, local: &mut WPWorker<O>) {
+impl<O: ObjectModel> Packet for TracePacket<O> {
+    fn run(&mut self, local: &mut WPWorker) {
         let mark_state = local.global.mark_state();
         let slots = std::mem::take(&mut self.slots);
         for slot in slots {
@@ -57,7 +62,7 @@ impl<O: ObjectModel> TracePacket<O> {
                         }
                         self.next_slots.push(s);
                         if self.next_slots.len() >= Self::CAP {
-                            self.flush(&local.worker);
+                            self.flush(&local.queue);
                         }
                     });
                 }
@@ -65,66 +70,61 @@ impl<O: ObjectModel> TracePacket<O> {
                 local.ne_edges += 1;
             }
         }
-        self.flush(&local.worker);
+        self.flush(&local.queue);
     }
 }
 
-struct GlobalContext {
-    mark_state: AtomicU8,
-    objs: AtomicU64,
-    edges: AtomicU64,
-    ne_edges: AtomicU64,
+struct ScanRoots<O: ObjectModel> {
+    range: Range<usize>,
+    _p: PhantomData<O>,
 }
 
-impl GlobalContext {
-    fn new() -> Self {
-        Self {
-            mark_state: AtomicU8::new(0),
-            objs: AtomicU64::new(0),
-            edges: AtomicU64::new(0),
-            ne_edges: AtomicU64::new(0),
+impl<O: ObjectModel> Packet for ScanRoots<O> {
+    fn run(&mut self, local: &mut WPWorker) {
+        let mut buf = vec![];
+        let Some(roots) = (unsafe { ROOTS }) else {
+            unreachable!()
+        };
+        let roots = unsafe { &*roots };
+        for root in &roots[self.range.clone()] {
+            let slot = Slot(root as *const u64 as *mut u64);
+            if buf.is_empty() {
+                buf.reserve(TracePacket::<O>::CAP);
+            }
+            buf.push(slot);
+            if buf.len() >= TracePacket::<O>::CAP {
+                let packet = TracePacket::<O>::new(buf);
+                local.queue.push(Box::new(packet));
+                buf = vec![];
+            }
+        }
+        if !buf.is_empty() {
+            let packet = TracePacket::<O>::new(buf);
+            local.queue.push(Box::new(packet));
         }
     }
-
-    fn set_mark_state(&self, mark_state: u8) {
-        self.mark_state.store(mark_state, Ordering::SeqCst);
-    }
-
-    fn mark_state(&self) -> u8 {
-        self.mark_state.load(Ordering::Relaxed)
-    }
 }
 
-impl Context for GlobalContext {
-    fn reset(&self) {
-        self.objs.store(0, Ordering::SeqCst);
-        self.edges.store(0, Ordering::SeqCst);
-        self.ne_edges.store(0, Ordering::SeqCst);
-    }
-}
-
-struct WPWorker<O: ObjectModel> {
-    id: usize,
-    worker: Worker<TracePacket<O>>,
-    stealers: Arc<Vec<Stealer<TracePacket<O>>>>,
-    group: Arc<WorkerGroup>,
+struct WPWorker {
+    _id: usize,
+    queue: Worker<Box<dyn Packet>>,
     global: Arc<GlobalContext>,
+    group: Weak<WorkerGroup<WPWorker>>,
     objs: u64,
     edges: u64,
     ne_edges: u64,
 }
 
-impl<O: ObjectModel> crate::util::workers::Worker for WPWorker<O> {
+impl crate::util::workers::Worker for WPWorker {
     type Global = GlobalContext;
-    type SharedWorker = Stealer<TracePacket<O>>;
+    type SharedWorker = Stealer<Box<dyn Packet>>;
 
-    fn new(id: usize, group: Arc<WorkerGroup>, global: Arc<Self::Global>) -> Self {
+    fn new(id: usize, group: Weak<WorkerGroup<Self>>, global: Arc<Self::Global>) -> Self {
         Self {
-            id,
-            worker: Worker::new_lifo(),
-            stealers: Arc::new(vec![]),
-            global,
+            _id: id,
+            queue: Worker::new_lifo(),
             group,
+            global,
             objs: 0,
             edges: 0,
             ne_edges: 0,
@@ -132,49 +132,26 @@ impl<O: ObjectModel> crate::util::workers::Worker for WPWorker<O> {
     }
 
     fn new_shared(&self) -> Self::SharedWorker {
-        self.worker.stealer()
-    }
-
-    fn init(&mut self, stealers: Arc<Vec<Self::SharedWorker>>) {
-        self.stealers = stealers;
+        self.queue.stealer()
     }
 
     fn run_epoch(&mut self) {
         self.objs = 0;
         self.edges = 0;
         self.ne_edges = 0;
-        // scan roots
-        if let Some(roots) = unsafe { ROOTS } {
-            let roots = unsafe { &*roots };
-            let range =
-                (roots.len() * self.id) / N_WORKERS..(roots.len() * (self.id + 1)) / N_WORKERS;
-            let mut buf = vec![];
-            for root in &roots[range] {
-                let slot = Slot(root as *const u64 as *mut u64);
-                if buf.is_empty() {
-                    buf.reserve(TracePacket::<O>::CAP);
-                }
-                buf.push(slot);
-                if buf.len() >= TracePacket::<O>::CAP {
-                    let packet = TracePacket::<O>::new(buf);
-                    self.worker.push(packet);
-                    buf = vec![];
-                }
-            }
-            if !buf.is_empty() {
-                let packet = TracePacket::<O>::new(buf);
-                self.worker.push(packet);
-            }
-        }
-        self.group.sync();
+        let group = self.group.upgrade().unwrap();
         // trace objects
         'outer: loop {
             // Drain local queue
-            while let Some(mut p) = self.worker.pop() {
+            while let Some(mut p) = self.queue.pop() {
+                p.run(self);
+            }
+            // Steal from global queue
+            while let Steal::Success(mut p) = self.global.queue.steal() {
                 p.run(self);
             }
             // Steal from other workers
-            for stealer in &*self.stealers {
+            for stealer in &*group.workers {
                 match stealer.steal() {
                     Steal::Success(mut p) => {
                         p.run(self);
@@ -186,7 +163,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for WPWorker<O> {
             }
             break;
         }
-        assert!(self.worker.is_empty());
+        assert!(self.queue.is_empty());
         let global = &self.global;
         global.objs.fetch_add(self.objs, Ordering::SeqCst);
         global.edges.fetch_add(self.edges, Ordering::SeqCst);
@@ -194,28 +171,69 @@ impl<O: ObjectModel> crate::util::workers::Worker for WPWorker<O> {
     }
 }
 
-struct WPMMTkTracer<O: ObjectModel> {
-    group: Arc<WorkerGroup>,
+struct GlobalContext {
+    queue: Injector<Box<dyn Packet>>,
+    mark_state: AtomicU8,
+    objs: AtomicU64,
+    edges: AtomicU64,
+    ne_edges: AtomicU64,
+}
+
+impl GlobalContext {
+    fn new() -> Self {
+        Self {
+            queue: Injector::new(),
+            mark_state: AtomicU8::new(0),
+            objs: AtomicU64::new(0),
+            edges: AtomicU64::new(0),
+            ne_edges: AtomicU64::new(0),
+        }
+    }
+
+    fn mark_state(&self) -> u8 {
+        self.mark_state.load(Ordering::Relaxed)
+    }
+
+    fn reset(&self) {
+        self.objs.store(0, Ordering::SeqCst);
+        self.edges.store(0, Ordering::SeqCst);
+        self.ne_edges.store(0, Ordering::SeqCst);
+    }
+}
+
+struct WPTracer<O: ObjectModel> {
+    group: Arc<WorkerGroup<WPWorker>>,
     global: Arc<GlobalContext>,
     _p: PhantomData<O>,
 }
 
-impl<O: ObjectModel> Tracer<O> for WPMMTkTracer<O> {
+impl<O: ObjectModel> Tracer<O> for WPTracer<O> {
     fn startup(&self) {
-        self.group.spawn::<WPWorker<O>>(&self.global);
+        self.group.spawn();
     }
 
     fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
-        self.global.set_mark_state(mark_sense);
+        self.global.reset();
+        self.global.mark_state.store(mark_sense, Ordering::SeqCst);
         // Get roots
-        unsafe { ROOTS = Some(object_model.roots()) };
+        let roots = object_model.roots();
+        let roots_len = roots.len();
+        unsafe { ROOTS = Some(roots) };
+        let num_workers = self.group.workers.len();
+        for id in 0..num_workers {
+            let range = (roots_len * id) / num_workers..(roots_len * (id + 1)) / num_workers;
+            let packet = ScanRoots::<O> {
+                range,
+                _p: PhantomData,
+            };
+            self.global.queue.push(Box::new(packet));
+        }
         // Wake up workers
         self.group.run_epoch();
-        let global = &self.global;
         TracingStats {
-            marked_objects: global.objs.load(Ordering::SeqCst),
-            slots: global.edges.load(Ordering::SeqCst),
-            non_empty_slots: global.ne_edges.load(Ordering::SeqCst),
+            marked_objects: self.global.objs.load(Ordering::SeqCst),
+            slots: self.global.edges.load(Ordering::SeqCst),
+            non_empty_slots: self.global.ne_edges.load(Ordering::SeqCst),
             sends: 0,
         }
     }
@@ -225,16 +243,17 @@ impl<O: ObjectModel> Tracer<O> for WPMMTkTracer<O> {
     }
 }
 
-impl<O: ObjectModel> WPMMTkTracer<O> {
+impl<O: ObjectModel> WPTracer<O> {
     pub fn new() -> Self {
+        let global = Arc::new(GlobalContext::new());
         Self {
-            group: Arc::new(WorkerGroup::new(32)),
-            global: Arc::new(GlobalContext::new()),
+            group: WorkerGroup::new(32, &global),
+            global: global,
             _p: PhantomData,
         }
     }
 }
 
 pub fn create_tracer<O: ObjectModel>() -> Box<dyn Tracer<O>> {
-    Box::new(WPMMTkTracer::<O>::new())
+    Box::new(WPTracer::<O>::new())
 }

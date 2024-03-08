@@ -1,8 +1,8 @@
 use std::{
-    cell::RefCell,
+    cell::UnsafeCell,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, Barrier, BarrierWaitResult, Condvar, Mutex,
+        Arc, Barrier, BarrierWaitResult, Condvar, Mutex, Weak,
     },
 };
 
@@ -26,47 +26,46 @@ impl Monitor {
     }
 }
 
-pub struct WorkerGroup {
+pub struct WorkerGroup<W: Worker> {
     num_workers: usize,
     monitor: Arc<Monitor>,
     handles: Mutex<Vec<std::thread::JoinHandle<()>>>,
-    global: RefCell<Option<Arc<dyn Context>>>,
+    pub workers: Vec<W::SharedWorker>,
+    local_workers: Mutex<Option<Vec<W>>>,
 }
 
-unsafe impl Send for WorkerGroup {}
-unsafe impl Sync for WorkerGroup {}
-
-impl WorkerGroup {
-    pub fn new(num_workers: usize) -> Self {
-        Self {
-            num_workers,
-            monitor: Arc::new(Monitor::new(num_workers)),
-            handles: Mutex::new(Vec::new()),
-            global: RefCell::new(None),
-        }
+impl<W: Worker> WorkerGroup<W> {
+    pub fn new(num_workers: usize, global: &Arc<W::Global>) -> Arc<Self> {
+        Arc::new_cyclic(|w| {
+            let mut workers = vec![];
+            let mut shared = vec![];
+            for i in 0..num_workers {
+                let worker = W::new(i, w.clone(), global.clone());
+                shared.push(worker.new_shared());
+                workers.push(worker);
+            }
+            Self {
+                num_workers,
+                monitor: Arc::new(Monitor::new(num_workers)),
+                handles: Mutex::new(Vec::new()),
+                workers: shared,
+                local_workers: Mutex::new(Some(workers)),
+            }
+        })
     }
 
+    /// Barrier synchronization
     pub fn sync(&self) -> BarrierWaitResult {
         self.monitor.barrier.wait()
     }
 
-    // Spawn workers
-    pub fn spawn<W: Worker>(self: &Arc<Self>, global: &Arc<W::Global>) {
-        self.global.replace(Some(global.clone()));
+    /// Spawn workers
+    pub fn spawn(&self) {
         let mut handles = self.handles.lock().unwrap();
-        let mut workers = vec![];
-        let mut shared = vec![];
-        for i in 0..self.num_workers {
-            let worker = W::new(i, self.clone(), global.clone());
-            shared.push(worker.new_shared());
-            workers.push(worker);
-        }
-        let shared_arc = Arc::new(shared);
-        for (_i, mut worker) in workers.into_iter().enumerate() {
+        let workers = self.local_workers.lock().unwrap().take().unwrap();
+        for mut worker in workers.into_iter() {
             let monitor = self.monitor.clone();
-            let shared = shared_arc.clone();
             let handle = std::thread::spawn(move || {
-                worker.init(shared);
                 loop {
                     // Wait for GC request
                     {
@@ -95,9 +94,8 @@ impl WorkerGroup {
         }
     }
 
-    // Run an GC epoch
+    /// Wake up the workers to run an GC epoch
     pub fn run_epoch(&self) {
-        self.global.borrow().as_ref().unwrap().reset();
         // Wake up workers
         let mut epoch = self.monitor.lock.lock().unwrap();
         self.monitor.epoch.fetch_add(1, Ordering::SeqCst);
@@ -108,7 +106,7 @@ impl WorkerGroup {
         }
     }
 
-    // Terminate workers
+    /// Terminate workers
     pub fn finish(&self) {
         // Notify workers to finish
         let guard = self.monitor.lock.lock().unwrap();
@@ -128,15 +126,17 @@ impl WorkerGroup {
     }
 }
 
-pub trait Worker: Send + 'static {
-    type Global: Send + Sync + Context + 'static;
+/// Private thread-local worker data
+pub trait Worker: Send + 'static + Sized {
+    /// The globally shared data
+    type Global: Send + Sync + 'static;
+    /// The shared worker data
     type SharedWorker: Send + Sync + 'static;
-    fn new(id: usize, group: Arc<WorkerGroup>, global: Arc<Self::Global>) -> Self;
-    fn new_shared(&self) -> Self::SharedWorker;
-    fn init(&mut self, workers: Arc<Vec<Self::SharedWorker>>);
-    fn run_epoch(&mut self);
-}
 
-pub trait Context {
-    fn reset(&self) {}
+    /// Create a new worker
+    fn new(id: usize, group: Weak<WorkerGroup<Self>>, global: Arc<Self::Global>) -> Self;
+    /// Create a new shared worker
+    fn new_shared(&self) -> Self::SharedWorker;
+    /// Run an GC epoch
+    fn run_epoch(&mut self);
 }
