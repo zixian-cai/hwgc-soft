@@ -40,7 +40,7 @@ prost-build = { version = "0.11" }
 built = { version = "0.7.1", features = ["git2"] }
 
 [dev-dependencies]
-harness = { git = "https://github.com/wenyuzhao/cargo-harness.git", rev = "7b29cd596115391baf019eebb2038cd5fb19689d" }
+harness = "0.0.2"
 
 [features]
 m5 = []
