@@ -827,9 +827,9 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.0.2"
+version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "576bf5bd04d22a9b5c37079ee9e30eb6f5bf28747e5cf1f8074cca85fd6cb599"
+checksum = "2d159eb06a462c72dcc4c4e9095768404ca99f1bcccb571279af3d7c1109f789"
 dependencies = [
  "anyhow",
  "clap",
@@ -1129,7 +1129,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.3",
 ]
 
 [[package]]
