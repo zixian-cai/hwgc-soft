@@ -66,11 +66,13 @@ impl<W: Worker> WorkerGroup<W> {
                     // Wait for GC request
                     {
                         let mut epoch = monitor.lock.lock().unwrap();
-                        while *epoch == monitor.epoch.load(Ordering::SeqCst) {
+                        while *epoch == monitor.epoch.load(Ordering::SeqCst)
+                            && !monitor.finish.load(Ordering::SeqCst)
+                        {
                             epoch = monitor.cvar.wait(epoch).unwrap();
-                            if monitor.finish.load(Ordering::SeqCst) {
-                                return;
-                            }
+                        }
+                        if monitor.finish.load(Ordering::SeqCst) {
+                            return;
                         }
                     }
                     // Do GC
