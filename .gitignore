@@ -12,3 +12,9 @@ target/
 /builds
 /.vscode
 /env
+/sampled
+/results
+/*.log
+/*.zip
+/_*
+/protoc
