@@ -21,6 +21,7 @@ pub enum TracingLoopChoice {
     WPEdgeSlot,
     WPEdgeSlotDual,
     ParEdgeSlot,
+    ParEdgeSlot2,
 }
 
 #[derive(Debug, Default)]
@@ -69,6 +70,7 @@ mod edge_objref;
 mod edge_slot;
 mod node_objref;
 mod par_edge_slot;
+mod par_edge_slot2;
 mod sanity;
 mod shape_cache;
 mod wp_edge_slot;
@@ -85,6 +87,7 @@ fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>>
         TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
         TracingLoopChoice::WPEdgeSlotDual => Some(wp_edge_slot_dual::create_tracer::<O>(args)),
         TracingLoopChoice::ParEdgeSlot => Some(par_edge_slot::create_tracer::<O>(args)),
+        TracingLoopChoice::ParEdgeSlot2 => Some(par_edge_slot2::create_tracer::<O>(args)),
         _ => None,
     }
 }
@@ -123,7 +126,8 @@ fn transitive_closure<O: ObjectModel>(
             ),
             TracingLoopChoice::WPEdgeSlot
             | TracingLoopChoice::WPEdgeSlotDual
-            | TracingLoopChoice::ParEdgeSlot => {
+            | TracingLoopChoice::ParEdgeSlot
+            | TracingLoopChoice::ParEdgeSlot2 => {
                 if let Some(tracer) = tracer {
                     tracer.trace(mark_sense, object_model)
                 } else {
