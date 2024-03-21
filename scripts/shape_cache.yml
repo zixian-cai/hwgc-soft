@@ -10,19 +10,27 @@ modifiers:
   shape_cache_size:
     type: ProgramArg
     val: "--shape-cache-size {0}"
+  iteration:
+    type: ProgramArg
+    val: "-i {0}"
 
 
 configs:
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-1"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-2"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-4"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-8"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-16"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-32"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-64"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-128"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-256"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-512"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-1024"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-2048"
-  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-4096"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-1|iteration-1"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-2|iteration-1"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-4|iteration-1"
+  - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-8|iteration-1"
+  - "native|run_build-hwgc_soft|om-OpenJDKAE    |subcommand-trace|tl-ShapeCache|shape_cache_size-1|iteration-1"
+  - "native|run_build-hwgc_soft|om-OpenJDKAE    |subcommand-trace|tl-ShapeCache|shape_cache_size-2|iteration-1"
+  - "native|run_build-hwgc_soft|om-OpenJDKAE    |subcommand-trace|tl-ShapeCache|shape_cache_size-4|iteration-1"
+  - "native|run_build-hwgc_soft|om-OpenJDKAE    |subcommand-trace|tl-ShapeCache|shape_cache_size-8|iteration-1"
+  # Content addressible memory is expensive. Let's skip larger sizes for now
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-16"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-32"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-64"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-128"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-256"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-512"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-1024"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-2048"
+  # - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-trace|tl-ShapeCache|shape_cache_size-4096"
