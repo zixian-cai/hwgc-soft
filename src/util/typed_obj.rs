@@ -1,6 +1,7 @@
 use crate::{object_model::Header, ObjectModel};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[repr(transparent)]
 pub struct Slot(*mut u64);
 
 unsafe impl Send for Slot {}
@@ -22,10 +23,11 @@ impl Slot {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+#[repr(transparent)]
 pub struct Object(u64);
 
 impl Object {
-    pub fn raw(&self) -> u64 {
+    pub const fn raw(&self) -> u64 {
         self.0
     }
 
