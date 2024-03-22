@@ -11,7 +11,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Barrier, Condvar, Mutex,
     },
-    time::SystemTime,
+    time::Instant,
 };
 
 type DistGCMsg = u64;
@@ -22,7 +22,7 @@ static NON_EMPTY_SLOTS: AtomicU64 = AtomicU64::new(0);
 static SENDS: AtomicU64 = AtomicU64::new(0);
 static PARKED_THREADS: AtomicUsize = AtomicUsize::new(0);
 
-const LOG_NUM_TREADS: usize = 5;
+const LOG_NUM_TREADS: usize = 0;
 const NUM_THREADS: usize = 1 << LOG_NUM_TREADS;
 // we spread cache lines (2^6 = 64B) across four memory channels
 const OWNER_SHIFT: usize = 15;
@@ -42,16 +42,17 @@ unsafe impl Send for ForwardQueue {}
 unsafe impl Sync for ForwardQueue {}
 
 impl ForwardQueue {
+    const LOG_SIZE: usize = if NUM_THREADS == 1 { 21 } else { 15 };
     fn new() -> ForwardQueue {
         ForwardQueue {
-            queue: UnsafeCell::new(vec![Slot::from_raw(0 as _); 1 << 15]),
+            queue: UnsafeCell::new(vec![Slot::from_raw(0 as _); 1 << Self::LOG_SIZE]),
             head: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
         }
     }
 
-    fn next(v: usize) -> usize {
-        (v + 1) & ((1 << 15) - 1)
+    const fn next(v: usize) -> usize {
+        (v + 1) & ((1 << Self::LOG_SIZE) - 1)
     }
 
     fn is_empty(&self) -> bool {
@@ -94,7 +95,7 @@ struct State {
     yielded: AtomicUsize,
     gc_finished: AtomicBool,
     workers: [PerWorkerState; NUM_THREADS],
-    start_time: SystemTime,
+    start_time: Instant,
 }
 
 impl Default for State {
@@ -103,7 +104,7 @@ impl Default for State {
             yielded: AtomicUsize::new(0),
             gc_finished: AtomicBool::new(false),
             workers: Default::default(),
-            start_time: SystemTime::now(),
+            start_time: Instant::now(),
         }
     }
 }
@@ -160,14 +161,14 @@ impl DistGCThread {
                     .slept
                     .store(true, Ordering::SeqCst);
                 let old = self.state.yielded.fetch_add(1, Ordering::Relaxed);
-                // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
-                // println!(
-                //     "[{:.3}] Thread {} Sleep total={} slots={}",
-                //     ms,
-                //     self.id,
-                //     old + 1,
-                //     self.slots
-                // );
+                let ms = self.state.start_time.elapsed().as_micros() as f64 / 1000.0;
+                println!(
+                    "[{:.3}] Thread {} Sleep total={} slots={}",
+                    ms,
+                    self.id,
+                    old + 1,
+                    self.slots
+                );
                 self.slots = 0;
                 if old + 1 == NUM_THREADS {
                     self.state.gc_finished.store(true, Ordering::SeqCst);
@@ -196,77 +197,70 @@ impl DistGCThread {
         false
     }
 
+    unsafe fn trace_object<O: ObjectModel>(
+        &mut self,
+        o: Object,
+        mark_sense: u8,
+        notify_threads: &mut Vec<bool>,
+    ) {
+        if trace_object(o.raw(), mark_sense) {
+            self.counters.marked_objects += 1;
+            o.scan::<O, _>(|s| {
+                self.counters.slots += 1;
+                let Some(child) = s.load() else {
+                    return;
+                };
+                self.counters.non_empty_slots += 1;
+                if child.is_marked(mark_sense) {
+                    return;
+                }
+                let owner = get_owner_thread(child.raw());
+                if owner == self.id {
+                    self.scan_queue.push_back(s);
+                } else {
+                    self.queues[self.id][owner].enq(s);
+                    notify_threads[owner] = true;
+                }
+            })
+        }
+    }
+
+    unsafe fn process_slot<O: ObjectModel>(
+        &mut self,
+        slot: Slot,
+        mark_sense: u8,
+        notify_threads: &mut Vec<bool>,
+    ) {
+        let o = slot.load().unwrap();
+        debug_assert_eq!(get_owner_thread(o.raw()), self.id);
+        self.slots += 1;
+        self.iter_slots += 1;
+        self.trace_object::<O>(o, mark_sense, notify_threads);
+    }
+
     unsafe fn run<O>(&mut self, mark_sense: u8)
     where
         O: ObjectModel,
     {
-        let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
+        // let ms = self.state.start_time.elapsed().as_micros() as f64 / 1000.0;
         // println!("[{:.3}] Thread {} Start", ms, self.id);
         // info!("Thread {} started", self.id);
         let mut notify_threads = vec![false; NUM_THREADS];
         loop {
             self.iter_slots = 0;
-            // if self.scan_queue.len() != 0 {
-            // println!(
-            //     "Thread {} A {} {}",
-            //     self.id,
-            //     self.scan_queue.len(),
-            //     self.counters.marked_objects
-            // );
-            // }
-            while let Some(slot) = self.scan_queue.pop_front() {
-                let o = slot.load().unwrap();
-                debug_assert_eq!(get_owner_thread(o.raw()), self.id);
-                self.slots += 1;
-                self.iter_slots += 1;
-                if trace_object(o.raw(), mark_sense) {
-                    self.counters.marked_objects += 1;
-                    o.scan::<O, _>(|s| {
-                        self.counters.slots += 1;
-                        let Some(child) = s.load() else {
-                            return;
-                        };
-                        self.counters.non_empty_slots += 1;
-                        if child.is_marked(mark_sense) {
-                            return;
-                        }
-                        let owner = get_owner_thread(child.raw());
-                        if owner == self.id {
-                            self.scan_queue.push_back(s);
-                        } else {
-                            self.queues[self.id][owner].enq(s);
-                            notify_threads[owner] = true;
-                        }
-                    })
+
+            for i in 0..NUM_THREADS {
+                // let q = &self.queues[i][self.id];
+                while let Some(slot) = self.queues[i][self.id].deq() {
+                    // self.scan_queue.push_back(slot);
+                    self.process_slot::<O>(slot, mark_sense, &mut notify_threads);
                 }
-                // if self.iter_slots % 200 == 0 {
-                //     // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
-                //     // println!("[{:.3}] Thread {} Iter {}", ms, self.id, self.iter_slots);
-                //     for i in 0..NUM_THREADS {
-                //         if i == self.id {
-                //             continue;
-                //         }
-                //         while let Some(child) = self.queues[i][self.id].deq() {
-                //             self.scan_queue.push_back(child);
-                //         }
-                //     }
-                // }
             }
 
-            // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
-            // println!("[{:.3}] Thread {} Batch {}", ms, self.id, self.iter_slots);
-            // if notify_threads.iter().any(|x| *x) {
-            //     println!(
-            //         "Thread {} Notify {:?}",
-            //         self.id,
-            //         notify_threads
-            //             .iter()
-            //             .enumerate()
-            //             .filter(|(_, x)| **x)
-            //             .map(|(i, _)| i)
-            //             .collect::<Vec<_>>()
-            //     );
-            // }
+            while let Some(slot) = self.scan_queue.pop_front() {
+                self.process_slot::<O>(slot, mark_sense, &mut notify_threads);
+            }
+
             for i in 0..NUM_THREADS {
                 if !notify_threads[i] {
                     continue;
@@ -279,22 +273,9 @@ impl DistGCThread {
                     }
                 }
             }
-            // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
-            // println!("[{:.3}] Thread {} synced", ms, self.id);
-            // println!("Thread {} B {}", self.id, self.scan_queue.len());
-            // Drain forward queues
-            for i in 0..NUM_THREADS {
-                if i == self.id {
-                    continue;
-                }
-                while let Some(child) = self.queues[i][self.id].deq() {
-                    self.scan_queue.push_back(child);
-                }
-            }
-            // std::thread::yield_now();
-            // if self.scan_queue.len() != 0 {
-            // println!("Thread {} C {}", self.id, self.scan_queue.len());
-            // }
+            // let ms = self.state.start_time.elapsed().as_micros() as f64 / 1000.0;
+            // println!("[{:.3}] thread terminate", ms,);
+
             // Terminate?
             if self.scan_queue.is_empty() {
                 let send_queues_empty = self.queues[self.id].iter().all(|q| q.is_empty());
@@ -309,7 +290,7 @@ impl DistGCThread {
     }
 }
 
-pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
+pub(super) unsafe fn transitive_closure_distributed_node_objref_impl<O: ObjectModel>(
     mark_sense: u8,
     object_model: &O,
 ) -> TracingStats {
@@ -337,6 +318,8 @@ pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
         .map(|id| DistGCThread::new(id, queues.clone(), Arc::clone(&state)))
         .collect::<Vec<_>>();
 
+    let ms = state.start_time.elapsed().as_micros() as f64 / 1000.0;
+    println!("[{:.3}] roots start", ms);
     for root in object_model.roots() {
         let o = *root;
         if cfg!(feature = "detailed_stats") {
@@ -347,13 +330,11 @@ pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
         }
         if o != 0 {
             let owner = get_owner_thread(o);
-            if owner == 0 {
-                queues[1][owner].enq(Slot::from_raw(root as *const u64 as *mut u64));
-            } else {
-                queues[0][owner].enq(Slot::from_raw(root as *const u64 as *mut u64));
-            }
+            queues[0][owner].enq(Slot::from_raw(root as *const u64 as *mut u64));
         }
     }
+    let ms = state.start_time.elapsed().as_micros() as f64 / 1000.0;
+    println!("[{:.3}] tracing start", ms);
 
     // let thread_join_handles: Vec<std::thread::JoinHandle<_>> = threads
     //     .iter_mut()
@@ -365,6 +346,9 @@ pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
             s.spawn(|| t.run::<O>(mark_sense));
         }
     });
+
+    let ms = state.start_time.elapsed().as_micros() as f64 / 1000.0;
+    println!("[{:.3}] tracing finish", ms);
 
     // for h in thread_join_handles {
     //     h.join().unwrap();
@@ -382,4 +366,15 @@ pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
         sends: 0,
         ..Default::default()
     }
+}
+
+pub(super) unsafe fn transitive_closure_distributed_node_objref<O: ObjectModel>(
+    mark_sense: u8,
+    object_model: &O,
+) -> TracingStats {
+    let t = Instant::now();
+    let r = transitive_closure_distributed_node_objref_impl(mark_sense, object_model);
+    let ms = t.elapsed().as_micros() as f64 / 1000.0;
+    println!("[{:.3}] all finish", ms);
+    r
 }
