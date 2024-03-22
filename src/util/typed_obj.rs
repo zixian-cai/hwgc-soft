@@ -1,4 +1,4 @@
-use crate::{object_model::Header, ObjectModel};
+use crate::{object_model::Header, trace::trace_object, ObjectModel};
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 #[repr(transparent)]
@@ -46,5 +46,9 @@ impl Object {
 
     pub fn mark(&self, mark_state: u8) -> bool {
         Header::attempt_mark_byte(self.raw(), mark_state)
+    }
+
+    pub fn marked_relaxed(&self, mark_state: u8) -> bool {
+        unsafe { trace_object(self.raw(), mark_state) }
     }
 }
