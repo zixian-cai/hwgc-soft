@@ -184,7 +184,7 @@ impl<O: ObjectModel> TracingWorker<O> {
         debug_assert_eq!(get_owner_thread(o.raw()), self.id);
         self.slots += 1;
         // self.iter_slots += 1;
-        if o.marked_relaxed(mark_sense) {
+        if o.mark_relaxed(mark_sense) {
             self.counters.marked_objects += 1;
             o.scan::<O, _>(|s| {
                 self.counters.slots += 1;

@@ -48,7 +48,7 @@ impl Object {
         Header::attempt_mark_byte(self.raw(), mark_state)
     }
 
-    pub fn marked_relaxed(&self, mark_state: u8) -> bool {
+    pub fn mark_relaxed(&self, mark_state: u8) -> bool {
         unsafe { trace_object(self.raw(), mark_state) }
     }
 }

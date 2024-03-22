@@ -29,7 +29,7 @@ impl<O: ObjectModel> Tracer<O> for EdgeSlotTracer<O> {
             slots += 1;
             if let Some(o) = e.load() {
                 non_empty_slots += 1;
-                if o.marked_relaxed(mark_sense) {
+                if o.mark_relaxed(mark_sense) {
                     marked_objects += 1;
                     o.scan::<O, _>(|s| {
                         let Some(c) = s.load() else { return };

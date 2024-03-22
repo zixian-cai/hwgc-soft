@@ -45,7 +45,7 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
             local.slots += 1;
             if let Some(o) = slot.load() {
                 let marked = if cfg!(feature = "relaxed_mark") {
-                    o.marked_relaxed(mark_state)
+                    o.mark_relaxed(mark_state)
                 } else {
                     o.mark(mark_state)
                 };
