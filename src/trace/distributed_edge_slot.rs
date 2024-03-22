@@ -178,16 +178,24 @@ impl<O: ObjectModel> TracingWorker<O> {
     fn process_slot(&mut self, slot: Slot, mark_sense: u8) {
         let o = slot.load().unwrap();
         debug_assert_eq!(get_owner_thread(o.raw()), self.id);
-        self.slots += 1;
+        if cfg!(feature = "detailed_stats") {
+            self.slots += 1;
+        }
         // self.iter_slots += 1;
         if o.marked_relaxed(mark_sense) {
-            self.counters.marked_objects += 1;
+            if cfg!(feature = "detailed_stats") {
+                self.counters.marked_objects += 1;
+            }
             o.scan::<O, _>(|s| {
-                self.counters.slots += 1;
+                if cfg!(feature = "detailed_stats") {
+                    self.counters.slots += 1;
+                }
                 let Some(child) = s.load() else {
                     return;
                 };
-                self.counters.non_empty_slots += 1;
+                if cfg!(feature = "detailed_stats") {
+                    self.counters.non_empty_slots += 1;
+                }
                 if child.is_marked(mark_sense) {
                     return;
                 }
@@ -239,7 +247,9 @@ impl<O: ObjectModel> crate::util::workers::Worker for TracingWorker<O> {
                         self.notify_threads[owner] = true;
                     }
                 } else {
-                    self.counters.slots += 1;
+                    if cfg!(feature = "detailed_stats") {
+                        self.counters.slots += 1;
+                    }
                 }
                 range.start += 1;
             }

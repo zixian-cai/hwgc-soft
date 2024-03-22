@@ -22,7 +22,9 @@ impl<O: ObjectModel> Tracer<O> for EdgeSlotTracer<O> {
             if let Some(_) = slot.load() {
                 mark_queue.push_back(slot);
             } else {
-                slots += 1;
+                if cfg!(feature = "detailed_stats") {
+                    slots += 1;
+                }
             }
         }
         while let Some(e) = mark_queue.pop_front() {
