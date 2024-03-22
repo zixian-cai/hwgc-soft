@@ -17,7 +17,11 @@ use std::{
     time::Instant,
 };
 
-const LOG_NUM_TREADS: usize = 0;
+const LOG_NUM_TREADS: usize = if cfg!(feature = "single_thread") {
+    0
+} else {
+    5
+};
 const NUM_THREADS: usize = 1 << LOG_NUM_TREADS;
 // we spread cache lines (2^6 = 64B) across four memory channels
 const OWNER_SHIFT: usize = 15;
@@ -178,24 +182,16 @@ impl<O: ObjectModel> TracingWorker<O> {
     fn process_slot(&mut self, slot: Slot, mark_sense: u8) {
         let o = slot.load().unwrap();
         debug_assert_eq!(get_owner_thread(o.raw()), self.id);
-        if cfg!(feature = "detailed_stats") {
-            self.slots += 1;
-        }
+        self.slots += 1;
         // self.iter_slots += 1;
         if o.marked_relaxed(mark_sense) {
-            if cfg!(feature = "detailed_stats") {
-                self.counters.marked_objects += 1;
-            }
+            self.counters.marked_objects += 1;
             o.scan::<O, _>(|s| {
-                if cfg!(feature = "detailed_stats") {
-                    self.counters.slots += 1;
-                }
+                self.counters.slots += 1;
                 let Some(child) = s.load() else {
                     return;
                 };
-                if cfg!(feature = "detailed_stats") {
-                    self.counters.non_empty_slots += 1;
-                }
+                self.counters.non_empty_slots += 1;
                 if child.is_marked(mark_sense) {
                     return;
                 }
@@ -247,9 +243,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for TracingWorker<O> {
                         self.notify_threads[owner] = true;
                     }
                 } else {
-                    if cfg!(feature = "detailed_stats") {
-                        self.counters.slots += 1;
-                    }
+                    self.counters.slots += 1;
                 }
                 range.start += 1;
             }

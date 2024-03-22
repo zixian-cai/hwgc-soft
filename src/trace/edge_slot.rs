@@ -22,23 +22,15 @@ impl<O: ObjectModel> Tracer<O> for EdgeSlotTracer<O> {
             if let Some(_) = slot.load() {
                 mark_queue.push_back(slot);
             } else {
-                if cfg!(feature = "detailed_stats") {
-                    slots += 1;
-                }
+                slots += 1;
             }
         }
         while let Some(e) = mark_queue.pop_front() {
-            if cfg!(feature = "detailed_stats") {
-                slots += 1;
-            }
+            slots += 1;
             if let Some(o) = e.load() {
-                if cfg!(feature = "detailed_stats") {
-                    non_empty_slots += 1;
-                }
+                non_empty_slots += 1;
                 if o.marked_relaxed(mark_sense) {
-                    if cfg!(feature = "detailed_stats") {
-                        marked_objects += 1;
-                    }
+                    marked_objects += 1;
                     o.scan::<O, _>(|s| {
                         let Some(c) = s.load() else { return };
                         if c.is_marked(mark_sense) {

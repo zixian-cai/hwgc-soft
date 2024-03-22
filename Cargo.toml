@@ -46,6 +46,7 @@ harness = "0.0.3"
 m5 = []
 zsim = []
 detailed_stats = []
+single_thread = []
 
 [profile.release]
 # lto = true
@@ -62,8 +63,12 @@ harness = false
 name = "tradesoap"
 harness = false
 
-[package.metadata.harness.profiles.default]
-
 [package.metadata.harness.profiles.default.builds]
 edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
+dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" }, features = [
+    "single_thread",
+] }
+
+[package.metadata.harness.profiles.par.builds]
+wp_edge_slot = { env = { TRACING_LOOP = "WPEdgeSlot" } }
 dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" } }
