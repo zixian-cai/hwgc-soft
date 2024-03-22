@@ -17,7 +17,7 @@ use std::{
     time::Instant,
 };
 
-const LOG_NUM_TREADS: usize = 0;
+const LOG_NUM_TREADS: usize = 5;
 const NUM_THREADS: usize = 1 << LOG_NUM_TREADS;
 // we spread cache lines (2^6 = 64B) across four memory channels
 const OWNER_SHIFT: usize = 15;
@@ -230,7 +230,17 @@ impl<O: ObjectModel> crate::util::workers::Worker for TracingWorker<O> {
         while let Some(mut range) = GLOBAL.root_segments.pop() {
             while let Some(root) = roots.get(range.start) {
                 let slot = Slot::from_raw(root as *const u64 as *mut u64);
-                self.queue.push_back(slot);
+                if let Some(c) = slot.load() {
+                    let owner = get_owner_thread(c.raw());
+                    if owner == self.id {
+                        self.queue.push_back(slot);
+                    } else {
+                        self.global.queues[self.id][owner].enq(slot);
+                        self.notify_threads[owner] = true;
+                    }
+                } else {
+                    self.counters.slots += 1;
+                }
                 range.start += 1;
             }
         }

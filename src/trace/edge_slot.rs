@@ -19,7 +19,11 @@ impl<O: ObjectModel> Tracer<O> for EdgeSlotTracer<O> {
         let mut non_empty_slots = 0;
         for root in object_model.roots() {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
-            mark_queue.push_back(slot);
+            if let Some(_) = slot.load() {
+                mark_queue.push_back(slot);
+            } else {
+                slots += 1;
+            }
         }
         while let Some(e) = mark_queue.pop_front() {
             if cfg!(feature = "detailed_stats") {
@@ -34,6 +38,10 @@ impl<O: ObjectModel> Tracer<O> for EdgeSlotTracer<O> {
                         marked_objects += 1;
                     }
                     o.scan::<O, _>(|s| {
+                        let Some(c) = s.load() else { return };
+                        if c.is_marked(mark_sense) {
+                            return;
+                        }
                         mark_queue.push_back(s);
                     })
                 }
