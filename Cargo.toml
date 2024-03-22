@@ -26,7 +26,10 @@ env_logger = "0.10"
 zsim-hooks = "0.1.0"
 clap = { version = "4.4.10", features = ["derive"] }
 fixedbitset = "0.4.2"
-crossbeam = { version = "0.8.4", features = ["crossbeam-channel","crossbeam-deque"] }
+crossbeam = { version = "0.8.4", features = [
+    "crossbeam-channel",
+    "crossbeam-deque",
+] }
 polars = { version = "0.37", features = ["diagonal_concat", "parquet"] }
 lru = "0.12"
 once_cell = "1.19.0"
@@ -62,5 +65,5 @@ harness = false
 [package.metadata.harness.profiles.default]
 
 [package.metadata.harness.profiles.default.builds]
-wp_edge_slot = { env = { TRACING_LOOP = "WPEdgeSlot" } }
-wp_edge_slot_dual = { env = { TRACING_LOOP = "WPEdgeSlotDual" } }
+edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
+dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" } }
