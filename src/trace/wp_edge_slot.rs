@@ -44,9 +44,18 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
         for slot in std::mem::take(&mut self.slots) {
             local.slots += 1;
             if let Some(o) = slot.load() {
-                if o.mark(mark_state) {
+                let marked = if cfg!(feature = "relaxed_mark") {
+                    o.marked_relaxed(mark_state)
+                } else {
+                    o.mark(mark_state)
+                };
+                if marked {
                     local.objs += 1;
                     o.scan::<O, _>(|s| {
+                        let Some(c) = s.load() else { return };
+                        if c.is_marked(mark_state) {
+                            return;
+                        }
                         if self.next_slots.is_empty() {
                             self.next_slots.reserve(capacity);
                         }

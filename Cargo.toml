@@ -47,6 +47,7 @@ m5 = []
 zsim = []
 detailed_stats = []
 single_thread = []
+relaxed_mark = []
 
 [profile.release]
 # lto = true
@@ -70,6 +71,10 @@ edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
 # ] }
 wp_edge_slot = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
     "single_thread",
+] }
+wp_edge_slot_relaxed = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
+    "single_thread",
+    "relaxed_mark",
 ] }
 
 [package.metadata.harness.profiles.par.builds]
