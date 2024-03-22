@@ -1,60 +1,61 @@
-use super::{trace_object, TracingStats};
-use crate::ObjectModel;
-use std::collections::VecDeque;
+use super::TracingStats;
+use crate::{
+    util::{tracer::Tracer, typed_obj::Slot},
+    ObjectModel,
+};
+use std::{collections::VecDeque, marker::PhantomData};
 
-pub(super) unsafe fn transitive_closure_edge_slot<O: ObjectModel>(
-    mark_sense: u8,
-    object_model: &O,
-) -> TracingStats {
-    // Edge-Slot enqueuing
-    let mut mark_queue: VecDeque<*mut u64> = VecDeque::new();
-    let mut marked_objects: u64 = 0;
-    let mut slots = 0;
-    let mut non_empty_slots = 0;
-    for root in object_model.roots() {
-        let o = *root;
-        if cfg!(feature = "detailed_stats") {
-            slots += 1;
-            if o != 0 {
-                non_empty_slots += 1;
-            }
+struct EdgeSlotTracer<O: ObjectModel> {
+    _p: PhantomData<O>,
+}
+
+impl<O: ObjectModel> Tracer<O> for EdgeSlotTracer<O> {
+    fn startup(&self) {}
+
+    fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
+        let mut mark_queue: VecDeque<Slot> = VecDeque::new();
+        let mut marked_objects: u64 = 0;
+        let mut slots = 0;
+        let mut non_empty_slots = 0;
+        for root in object_model.roots() {
+            let slot = Slot::from_raw(root as *const u64 as *mut u64);
+            mark_queue.push_back(slot);
         }
-        if o != 0 && trace_object(o, mark_sense) {
+        while let Some(e) = mark_queue.pop_front() {
             if cfg!(feature = "detailed_stats") {
-                marked_objects += 1;
+                slots += 1;
             }
-            O::scan_object(o, |edge, repeat| {
-                for i in 0..repeat {
-                    mark_queue.push_back(edge.wrapping_add(i as usize));
-                }
-            })
-        }
-    }
-    while let Some(e) = mark_queue.pop_front() {
-        let o = *e;
-        if cfg!(feature = "detailed_stats") {
-            slots += 1;
-        }
-        if o != 0 {
-            if cfg!(feature = "detailed_stats") {
-                non_empty_slots += 1;
-            }
-            if trace_object(o, mark_sense) {
+            if let Some(o) = e.load() {
                 if cfg!(feature = "detailed_stats") {
-                    marked_objects += 1;
+                    non_empty_slots += 1;
                 }
-                O::scan_object(o, |edge, repeat| {
-                    for i in 0..repeat {
-                        mark_queue.push_back(edge.wrapping_add(i as usize));
+                if o.marked_relaxed(mark_sense) {
+                    if cfg!(feature = "detailed_stats") {
+                        marked_objects += 1;
                     }
-                })
+                    o.scan::<O, _>(|s| {
+                        mark_queue.push_back(s);
+                    })
+                }
             }
         }
+        TracingStats {
+            marked_objects,
+            slots,
+            non_empty_slots,
+            ..Default::default()
+        }
     }
-    TracingStats {
-        marked_objects,
-        slots,
-        non_empty_slots,
-        ..Default::default()
+
+    fn teardown(&self) {}
+}
+
+impl<O: ObjectModel> EdgeSlotTracer<O> {
+    pub fn new() -> Self {
+        Self { _p: PhantomData }
     }
+}
+
+pub fn create_tracer<O: ObjectModel>() -> Box<dyn Tracer<O>> {
+    Box::new(EdgeSlotTracer::<O>::new())
 }

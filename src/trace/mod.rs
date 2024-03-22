@@ -86,6 +86,7 @@ use self::shape_cache::ShapeCacheStats;
 fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>> {
     // Only WPEdgeSlot supports the tracer interface for now.
     match args.tracing_loop {
+        TracingLoopChoice::EdgeSlot => Some(edge_slot::create_tracer::<O>()),
         TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
         TracingLoopChoice::WPEdgeSlotDual => Some(wp_edge_slot_dual::create_tracer::<O>(args)),
         TracingLoopChoice::ParEdgeSlot => Some(par_edge_slot::create_tracer::<O>(args)),
@@ -111,9 +112,6 @@ fn transitive_closure<O: ObjectModel>(
             TracingLoopChoice::EdgeObjref => {
                 edge_objref::transitive_closure_edge_objref(mark_sense, object_model)
             }
-            TracingLoopChoice::EdgeSlot => {
-                edge_slot::transitive_closure_edge_slot(mark_sense, object_model)
-            }
             TracingLoopChoice::NodeObjref => {
                 node_objref::transitive_closure_node_objref(mark_sense, object_model)
             }
@@ -133,7 +131,8 @@ fn transitive_closure<O: ObjectModel>(
             | TracingLoopChoice::WPEdgeSlotDual
             | TracingLoopChoice::ParEdgeSlot
             | TracingLoopChoice::ParEdgeSlot2
-            | TracingLoopChoice::DistributedEdgeSlot => {
+            | TracingLoopChoice::DistributedEdgeSlot
+            | TracingLoopChoice::EdgeSlot => {
                 if let Some(tracer) = tracer {
                     tracer.trace(mark_sense, object_model)
                 } else {

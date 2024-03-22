@@ -7,7 +7,7 @@ use clap::Parser;
 
 use crate::{
     BidirectionalObjectModel, HeapDump, ObjectModel, ObjectModelChoice, OpenJDKObjectModel,
-    TraceArgs, TracingLoopChoice,
+    TraceArgs,
 };
 
 use super::sanity::sanity_trace;
@@ -152,17 +152,12 @@ fn release<O: ObjectModel>(
 
 pub fn iter<O: ObjectModel>(
     object_model: &O,
-    trace_args: &TraceArgs,
+    _trace_args: &TraceArgs,
     tracer: &dyn Tracer<O>,
     iter: usize,
     _heapdump: &HeapDump,
 ) -> anyhow::Result<TracingStats> {
     let mark_sense = (iter % 2 == 0) as u8;
-    let stats = match trace_args.tracing_loop {
-        TracingLoopChoice::WPEdgeSlot
-        | TracingLoopChoice::WPEdgeSlotDual
-        | TracingLoopChoice::ParEdgeSlot => tracer.trace(mark_sense, object_model),
-        _ => unimplemented!(),
-    };
+    let stats = tracer.trace(mark_sense, object_model);
     Ok(stats)
 }
