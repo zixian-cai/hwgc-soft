@@ -20,7 +20,7 @@ static PARKED_THREADS: AtomicUsize = AtomicUsize::new(0);
 const LOG_NUM_TREADS: usize = 3;
 const NUM_THREADS: usize = 1 << LOG_NUM_TREADS;
 // we spread cache lines (2^6 = 64B) across four memory channels
-const OWNER_SHIFT: usize = 6;
+const OWNER_SHIFT: usize = 22;
 
 fn get_owner_thread(o: u64) -> usize {
     let mask = ((NUM_THREADS - 1) << OWNER_SHIFT) as u64;
@@ -55,7 +55,7 @@ impl DistGCThread {
     where
         O: ObjectModel,
     {
-        info!("Thread {} started", self.id);
+        // info!("Thread {} started", self.id);
         loop {
             while let Some(o) = self.scan_queue.pop_front() {
                 debug_assert_eq!(get_owner_thread(o), self.id);
@@ -89,14 +89,14 @@ impl DistGCThread {
                 });
             }
             if self.receiver.is_empty() {
-                info!("Thread {} entering barrier", self.id);
+                // info!("Thread {} entering barrier", self.id);
                 self.barrier.wait();
                 if self.receiver.is_empty() {
                     PARKED_THREADS.fetch_add(1, Ordering::SeqCst);
                 }
                 let wait = self.barrier.wait();
                 if PARKED_THREADS.load(Ordering::SeqCst) == NUM_THREADS {
-                    info!("Thread {} exiting", self.id);
+                    // info!("Thread {} exiting", self.id);
                     break;
                 }
                 if wait.is_leader() {

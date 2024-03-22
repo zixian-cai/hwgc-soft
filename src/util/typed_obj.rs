@@ -25,7 +25,7 @@ impl Slot {
 pub struct Object(u64);
 
 impl Object {
-    fn raw(&self) -> u64 {
+    pub fn raw(&self) -> u64 {
         self.0
     }
 
@@ -36,6 +36,10 @@ impl Object {
                 f(Slot(ptr));
             }
         })
+    }
+
+    pub fn is_marked(&self, mark_state: u8) -> bool {
+        Header::is_marked(self.raw(), mark_state)
     }
 
     pub fn mark(&self, mark_state: u8) -> bool {

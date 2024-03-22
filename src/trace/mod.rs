@@ -17,6 +17,7 @@ pub enum TracingLoopChoice {
     EdgeObjref,
     NodeObjref,
     DistributedNodeObjref,
+    DistributedEdgeSlot,
     ShapeCache,
     WPEdgeSlot,
     WPEdgeSlotDual,
@@ -65,6 +66,7 @@ pub(crate) unsafe fn trace_object(o: u64, mark_sense: u8) -> bool {
     }
 }
 
+mod distributed_edge_slot;
 mod distributed_node_objref;
 mod edge_objref;
 mod edge_slot;
@@ -114,6 +116,12 @@ fn transitive_closure<O: ObjectModel>(
             }
             TracingLoopChoice::DistributedNodeObjref => {
                 distributed_node_objref::transitive_closure_distributed_node_objref(
+                    mark_sense,
+                    object_model,
+                )
+            }
+            TracingLoopChoice::DistributedEdgeSlot => {
+                distributed_edge_slot::transitive_closure_distributed_node_objref(
                     mark_sense,
                     object_model,
                 )

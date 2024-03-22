@@ -24,6 +24,11 @@ impl Header {
         self.set_byte(val, 0);
     }
 
+    pub fn is_marked(o: u64, new_byte: u8) -> bool {
+        let old_byte = Header::load(o).get_mark_byte();
+        return old_byte == new_byte;
+    }
+
     pub fn attempt_mark_byte(o: u64, new_byte: u8) -> bool {
         let old_byte = Header::load(o).get_mark_byte();
         if old_byte == new_byte {
