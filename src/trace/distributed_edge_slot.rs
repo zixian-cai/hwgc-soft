@@ -17,7 +17,7 @@ use std::{
     time::Instant,
 };
 
-const LOG_NUM_TREADS: usize = 5;
+const LOG_NUM_TREADS: usize = 0;
 const NUM_THREADS: usize = 1 << LOG_NUM_TREADS;
 // we spread cache lines (2^6 = 64B) across four memory channels
 const OWNER_SHIFT: usize = 15;
