@@ -11,6 +11,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Barrier, Condvar, Mutex,
     },
+    time::SystemTime,
 };
 
 type DistGCMsg = u64;
@@ -24,7 +25,7 @@ static PARKED_THREADS: AtomicUsize = AtomicUsize::new(0);
 const LOG_NUM_TREADS: usize = 5;
 const NUM_THREADS: usize = 1 << LOG_NUM_TREADS;
 // we spread cache lines (2^6 = 64B) across four memory channels
-const OWNER_SHIFT: usize = 22;
+const OWNER_SHIFT: usize = 15;
 
 fn get_owner_thread(o: u64) -> usize {
     let mask = ((NUM_THREADS - 1) << OWNER_SHIFT) as u64;
@@ -89,11 +90,22 @@ struct PerWorkerState {
     monitor: (Mutex<()>, Condvar),
 }
 
-#[derive(Default)]
 struct State {
     yielded: AtomicUsize,
-    monitor: (Mutex<()>, Condvar),
+    gc_finished: AtomicBool,
     workers: [PerWorkerState; NUM_THREADS],
+    start_time: SystemTime,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            yielded: AtomicUsize::new(0),
+            gc_finished: AtomicBool::new(false),
+            workers: Default::default(),
+            start_time: SystemTime::now(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -111,6 +123,8 @@ struct DistGCThread {
     scan_queue: VecDeque<Slot>,
     counters: Counters,
     state: Arc<State>,
+    slots: u64,
+    iter_slots: u64,
 }
 
 impl DistGCThread {
@@ -123,14 +137,75 @@ impl DistGCThread {
             // senders: senders.to_vec(),
             scan_queue: VecDeque::new(),
             counters: Counters::default(),
+            slots: 0,
+            iter_slots: 0,
         }
     }
+
+    fn sleep(&mut self) -> bool {
+        // println!("Thread {} try lock", self.id);
+        let mut lock = self.state.workers[self.id].monitor.0.lock().unwrap();
+        // println!("Thread {} locked", self.id);
+        loop {
+            if self.state.gc_finished.load(Ordering::SeqCst) {
+                // println!("Thread {} Exit", self.id);
+                return true;
+            }
+            let recv_queues_empty = self.queues.iter().all(|r| r[self.id].is_empty());
+            if !recv_queues_empty {
+                break;
+            }
+            if !self.state.workers[self.id].slept.load(Ordering::SeqCst) {
+                self.state.workers[self.id]
+                    .slept
+                    .store(true, Ordering::SeqCst);
+                let old = self.state.yielded.fetch_add(1, Ordering::Relaxed);
+                // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
+                // println!(
+                //     "[{:.3}] Thread {} Sleep total={} slots={}",
+                //     ms,
+                //     self.id,
+                //     old + 1,
+                //     self.slots
+                // );
+                self.slots = 0;
+                if old + 1 == NUM_THREADS {
+                    self.state.gc_finished.store(true, Ordering::SeqCst);
+                    for i in 0..NUM_THREADS {
+                        if i != self.id {
+                            let _lock = self.state.workers[i].monitor.0.lock().unwrap();
+                            self.state.workers[i].monitor.1.notify_one();
+                        }
+                    }
+                    // println!("Thread {} Exit", self.id);
+                    return true;
+                }
+            }
+            // println!("Thread {} (wait start)", self.id);
+            lock = self.state.workers[self.id].monitor.1.wait(lock).unwrap();
+            // println!("Thread {} (wait end)", self.id);
+        }
+        if self.state.workers[self.id].slept.load(Ordering::SeqCst) {
+            self.state.workers[self.id]
+                .slept
+                .store(false, Ordering::SeqCst);
+            let old = self.state.yielded.fetch_sub(1, Ordering::Relaxed);
+            // println!("Thread {} Awake total={}", self.id, old - 1);
+        }
+        // println!("Thread {} unlock", self.id);
+        false
+    }
+
     unsafe fn run<O>(&mut self, mark_sense: u8)
     where
         O: ObjectModel,
     {
+        let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
+        // println!("[{:.3}] Thread {} Start", ms, self.id);
         // info!("Thread {} started", self.id);
+        let mut notify_threads = vec![false; NUM_THREADS];
         loop {
+            self.iter_slots = 0;
             // if self.scan_queue.len() != 0 {
             // println!(
             //     "Thread {} A {} {}",
@@ -142,6 +217,8 @@ impl DistGCThread {
             while let Some(slot) = self.scan_queue.pop_front() {
                 let o = slot.load().unwrap();
                 debug_assert_eq!(get_owner_thread(o.raw()), self.id);
+                self.slots += 1;
+                self.iter_slots += 1;
                 if trace_object(o.raw(), mark_sense) {
                     self.counters.marked_objects += 1;
                     o.scan::<O, _>(|s| {
@@ -158,15 +235,52 @@ impl DistGCThread {
                             self.scan_queue.push_back(s);
                         } else {
                             self.queues[self.id][owner].enq(s);
-                            // if self.state.workers[owner].slept.load(Ordering::Relaxed) {
-                            //     self.state.workers[owner].slept.store(false, Ordering::Relaxed);
-                            //     // self.state.workers[owner].monitor.1.notify_one();
-                            // }
-                            // self.state.workers[owner].monitor.1.notify_one();
+                            notify_threads[owner] = true;
                         }
                     })
                 }
+                // if self.iter_slots % 200 == 0 {
+                //     // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
+                //     // println!("[{:.3}] Thread {} Iter {}", ms, self.id, self.iter_slots);
+                //     for i in 0..NUM_THREADS {
+                //         if i == self.id {
+                //             continue;
+                //         }
+                //         while let Some(child) = self.queues[i][self.id].deq() {
+                //             self.scan_queue.push_back(child);
+                //         }
+                //     }
+                // }
             }
+
+            // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
+            // println!("[{:.3}] Thread {} Batch {}", ms, self.id, self.iter_slots);
+            // if notify_threads.iter().any(|x| *x) {
+            //     println!(
+            //         "Thread {} Notify {:?}",
+            //         self.id,
+            //         notify_threads
+            //             .iter()
+            //             .enumerate()
+            //             .filter(|(_, x)| **x)
+            //             .map(|(i, _)| i)
+            //             .collect::<Vec<_>>()
+            //     );
+            // }
+            for i in 0..NUM_THREADS {
+                if !notify_threads[i] {
+                    continue;
+                }
+                notify_threads[i] = false;
+                if self.state.workers[i].slept.load(Ordering::SeqCst) {
+                    let _lock = self.state.workers[i].monitor.0.lock().unwrap();
+                    if self.state.workers[i].slept.load(Ordering::SeqCst) {
+                        self.state.workers[i].monitor.1.notify_one();
+                    }
+                }
+            }
+            // let ms = self.state.start_time.elapsed().unwrap().as_micros() as f64 / 1000.0;
+            // println!("[{:.3}] Thread {} synced", ms, self.id);
             // println!("Thread {} B {}", self.id, self.scan_queue.len());
             // Drain forward queues
             for i in 0..NUM_THREADS {
@@ -177,135 +291,20 @@ impl DistGCThread {
                     self.scan_queue.push_back(child);
                 }
             }
-            std::thread::yield_now();
+            // std::thread::yield_now();
             // if self.scan_queue.len() != 0 {
             // println!("Thread {} C {}", self.id, self.scan_queue.len());
             // }
             // Terminate?
             if self.scan_queue.is_empty() {
-                // let all_sending_queues_empty = self.queues[self.id].iter().all(|q| q.is_empty());
-                // let all_receive_queues_empty =
-                //     self.queues.iter().all(|row| row[self.id].is_empty());
-                // println!(
-                //     "Thread {} D sending_queues={:?}",
-                //     self.id,
-                //     self.queues[self.id]
-                //         .iter()
-                //         .enumerate()
-                //         .filter(|(i, q)| !q.is_empty())
-                //         .map(|(i, q)| i)
-                //         .collect::<Vec<_>>()
-                // );
-                // println!(
-                //     "Thread {} D receive_queues={:?}",
-                //     self.id,
-                //     self.queues
-                //         .iter()
-                //         .enumerate()
-                //         .filter(|(i, r)| !r[self.id].is_empty())
-                //         .map(|(i, q)| i)
-                //         .collect::<Vec<_>>()
-                // );
-                // if all_sending_queues_empty && all_receive_queues_empty {
-                //     // println!("Thread {} terminated", self.id);
-                //     break;
-                // }
-                // let mut yielded = self.state.yielded.fetch_add(1, Ordering::Relaxed);
-                // self.state.workers[self.id]
-                //     .slept
-                //     .store(true, Ordering::SeqCst);
-                // let mut guard = self.state.workers[self.id].monitor.0.lock().unwrap();
-                // loop {
-                //     guard = self.state.workers[self.id].monitor.1.wait(guard);
-                //     if self.scan_queue.is_empty()
-                //         || self.queues.iter().all(|row| row[self.id].is_empty())
-                //     {
-                //         break;
-                //     }
-                // }
-                // self.state.workers[self.id]
-                //     .slept
-                //     .store(false, Ordering::SeqCst);
-                // self.state.yielded.fetch_sub(1, Ordering::Relaxed);
-
-                // let mut g = self.state.monitor.0.lock().unwrap();
-                // let mut guard = self.state.workers[self.id].monitor.0.lock().unwrap();
-                // self.state.workers[self.id]
-                //     .slept
-                //     .store(true, Ordering::SeqCst);
-                // let yielded = self.state.yielded.fetch_add(1, Ordering::SeqCst);
-                // if yielded == NUM_THREADS - 1 {
-                //     //
-                //     // println!("Thread {} Terminate", self.id);
-                //     for i in 0..NUM_THREADS {
-                //         self.state.workers[i].monitor.1.notify_one();
-                //     }
-                //     return;
-                // }
-                // std::mem::drop(g);
-                // // println!("Thread {} Sleep", self.id);
-                // // loop {
-                // // println!("Thread {} w", self.id);
-                // guard = self.state.workers[self.id].monitor.1.wait(guard).unwrap();
-                // // println!("Thread {} s", self.id);
-                // // if self.state.yielded.load(Ordering::SeqCst) == NUM_THREADS {
-                // //     println!("Thread {} Terminate", self.id);
-                // //     return;
-                // // }
-
-                // // println!(
-                // //     "Thread {} receive_queues={:?}",
-                // //     self.id,
-                // //     self.queues
-                // //         .iter()
-                // //         .enumerate()
-                // //         .filter(|(i, r)| !r[self.id].is_empty())
-                // //         .map(|(i, q)| i)
-                // //         .collect::<Vec<_>>()
-                // // );
-                // // if self.queues.iter().all(|row| row[self.id].is_empty()) {
-                // //     break;
-                // // }
-                // // }
-                // if self.state.yielded.load(Ordering::SeqCst) == NUM_THREADS {
-                //     // println!("Thread {} Terminate", self.id);
-                //     return;
-                // }
-                // // println!("Thread {} Awake", self.id);
-                // self.state.workers[self.id]
-                //     .slept
-                //     .store(false, Ordering::SeqCst);
-                // self.state.yielded.fetch_sub(1, Ordering::Relaxed);
-
-                if !self.state.workers[self.id].slept.load(Ordering::Relaxed) {
-                    self.state.workers[self.id]
-                        .slept
-                        .store(true, Ordering::SeqCst);
-                    let yielded = self.state.yielded.fetch_add(1, Ordering::SeqCst);
-                    if yielded == NUM_THREADS - 1 {
-                        // println!("Thread {} Terminate", self.id);
+                let send_queues_empty = self.queues[self.id].iter().all(|q| q.is_empty());
+                let recv_queues_empty = self.queues.iter().all(|r| r[self.id].is_empty());
+                if recv_queues_empty && send_queues_empty {
+                    if self.sleep() {
                         return;
                     }
-                    // println!("Thread {} Sleep {}", self.id, yielded);
-                } else {
-                    if self.state.yielded.load(Ordering::SeqCst) == NUM_THREADS {
-                        // println!("Thread {} Terminate", self.id);
-                        return;
-                    }
-                }
-            } else {
-                // self.state.workers[self.id]
-                //     .slept
-                //     .store(false, Ordering::SeqCst);
-
-                if self.state.workers[self.id].slept.load(Ordering::Relaxed) {
-                    self.state.workers[self.id]
-                        .slept
-                        .store(false, Ordering::SeqCst);
-                    self.state.yielded.fetch_sub(1, Ordering::SeqCst);
                 }
             }
-            std::thread::yield_now();
         }
     }
 }
