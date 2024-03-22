@@ -159,7 +159,7 @@ impl<O: ObjectModel> WPEdgeSlotTracer<O> {
 
 pub fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Box<dyn Tracer<O>> {
     let threads = if cfg!(feature = "single_thread") {
-        0
+        1
     } else {
         args.threads
     };
