@@ -88,6 +88,10 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
         let roots = unsafe { &*roots };
         for root in &roots[self.range.clone()] {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
+            if slot.load().is_none() {
+                local.slots += 1;
+                continue;
+            }
             if buf.is_empty() {
                 buf.reserve(capacity);
             }
@@ -154,6 +158,11 @@ impl<O: ObjectModel> WPEdgeSlotTracer<O> {
 }
 
 pub fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Box<dyn Tracer<O>> {
+    let threads = if cfg!(feature = "single_thread") {
+        0
+    } else {
+        args.threads
+    };
     GLOBAL.set_cap(args.wp_capacity);
-    Box::new(WPEdgeSlotTracer::<O>::new(args.threads))
+    Box::new(WPEdgeSlotTracer::<O>::new(threads))
 }

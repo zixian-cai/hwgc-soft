@@ -65,7 +65,10 @@ harness = false
 
 [package.metadata.harness.profiles.default.builds]
 edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
-dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" }, features = [
+# dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" }, features = [
+#     "single_thread",
+# ] }
+wp_edge_slot = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
     "single_thread",
 ] }
 
