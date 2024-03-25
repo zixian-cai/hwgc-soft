@@ -22,37 +22,34 @@ const NUM_QUEUES: usize = if cfg!(feature = "no_space_dispatch") {
 };
 
 struct TracePacket<O: ObjectModel> {
-    space: usize,
-    slots: Vec<Slot>,
-    next_slots: Vec<Vec<Slot>>,
+    slots: [Vec<Slot>; NUM_QUEUES],
+    next_slots: [Vec<Slot>; NUM_QUEUES],
+    next_len: usize,
     _p: PhantomData<O>,
 }
 
 impl<O: ObjectModel> TracePacket<O> {
-    fn new(slots: Vec<Slot>, space: usize) -> Self {
+    fn new(slots: [Vec<Slot>; NUM_QUEUES]) -> Self {
         Self {
-            space,
             slots,
-            next_slots: (0..NUM_QUEUES).map(|_| Vec::new()).collect::<Vec<_>>(),
+            next_slots: Default::default(),
+            next_len: 0,
             _p: PhantomData,
         }
     }
 
-    fn flush_one(&mut self, local: &Worker<Box<dyn Packet>>, index: usize) {
-        if !self.next_slots[index].is_empty() {
-            let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots[index]), index);
-            local.push(Box::new(next));
-        }
-    }
-
     fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
-        for i in 0..NUM_QUEUES {
-            self.flush_one(local, i);
+        if self.next_len > 0 {
+            let next_slots = std::mem::take(&mut self.next_slots);
+            let next = TracePacket::<O>::new(next_slots);
+            local.push(Box::new(next));
+            self.next_len = 0;
         }
     }
 
     fn get_queue_index(o: Object) -> usize {
         if cfg!(feature = "no_space_dispatch") {
+            debug_assert!(o.space_id() == 0x2 || o.space_id() == 0x6);
             (o.space_id() != 0x2) as usize
         } else {
             0
@@ -77,13 +74,15 @@ impl<O: ObjectModel> TracePacket<O> {
                 next_slots.reserve(cap);
             }
             next_slots.push(s);
-            if next_slots.len() >= cap {
-                self.flush_one(&local.queue, index);
+            self.next_len += 1;
+            if self.next_len >= cap {
+                self.flush(&local.queue);
             }
         });
     }
 
     fn trace_mark_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
+        debug_assert!(o.space_id() == 0x6);
         let marked = if cfg!(feature = "relaxed_mark") {
             o.mark_relaxed(mark_state)
         } else {
@@ -102,6 +101,7 @@ impl<O: ObjectModel> TracePacket<O> {
         mark_state: u8,
         cap: usize,
     ) {
+        debug_assert!(o.space_id() == 0x2);
         if cfg!(feature = "atomic_free_farwarding") {
             if o.is_forwarded_or_being_forwarded(mark_state) {
                 slot.volatile_store(o);
@@ -145,25 +145,26 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let capacity = GLOBAL.cap();
         let mark_state = local.global.mark_state();
-        let slots = std::mem::take(&mut self.slots);
-        local.slots += slots.len() as u64;
-        local.ne_slots += slots.len() as u64;
+        let mut slots = std::mem::take(&mut self.slots);
+        for i in 0..NUM_QUEUES {
+            local.slots += slots[i].len() as u64;
+            local.ne_slots += slots[i].len() as u64;
+        }
         if cfg!(feature = "no_space_dispatch") {
-            if self.space == 0 {
-                for slot in slots {
-                    let o = slot.load().unwrap();
-                    self.trace_forward_object(slot, o, local, mark_state, capacity);
-                }
-            } else {
-                for slot in slots {
-                    let o = slot.load().unwrap();
-                    self.trace_mark_object(o, local, mark_state, capacity);
-                }
+            for slot in std::mem::take(&mut slots[0]) {
+                let o = slot.load().unwrap();
+                self.trace_forward_object(slot, o, local, mark_state, capacity);
+            }
+            for slot in std::mem::take(&mut slots[1]) {
+                let o = slot.load().unwrap();
+                self.trace_mark_object(o, local, mark_state, capacity);
             }
         } else {
-            for slot in slots {
-                let o = slot.load().unwrap();
-                self.trace_object_generic(slot, o, local, mark_state, capacity);
+            for buf in slots {
+                for slot in buf {
+                    let o = slot.load().unwrap();
+                    self.trace_object_generic(slot, o, local, mark_state, capacity);
+                }
             }
         }
         self.flush(&local.queue);
@@ -187,7 +188,8 @@ impl<O: ObjectModel> ScanRoots<O> {
 impl<O: ObjectModel> Packet for ScanRoots<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let capacity = GLOBAL.cap();
-        let mut bufs = (0..NUM_QUEUES).map(|_| Vec::new()).collect::<Vec<_>>();
+        let mut slots: [Vec<Slot>; NUM_QUEUES] = Default::default();
+        let mut count = 0;
         let Some(roots) = (unsafe { ROOTS }) else {
             unreachable!()
         };
@@ -199,22 +201,21 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
                 continue;
             };
             let index = TracePacket::<O>::get_queue_index(o);
-            let buf = &mut bufs[index];
+            let buf = &mut slots[index];
             if buf.is_empty() {
                 buf.reserve(capacity);
             }
             buf.push(slot);
-            if buf.len() >= capacity {
-                let packet = TracePacket::<O>::new(std::mem::take(buf), index);
+            count += 1;
+            if count >= capacity {
+                let packet = TracePacket::<O>::new(std::mem::take(&mut slots));
                 local.queue.push(Box::new(packet));
-                bufs[index] = vec![];
+                count = 0;
             }
         }
-        for i in 0..NUM_QUEUES {
-            if !bufs[i].is_empty() {
-                let packet = TracePacket::<O>::new(std::mem::take(&mut bufs[i]), i);
-                local.queue.push(Box::new(packet));
-            }
+        if count > 0 {
+            let packet = TracePacket::<O>::new(std::mem::take(&mut slots));
+            local.queue.push(Box::new(packet));
         }
     }
 }

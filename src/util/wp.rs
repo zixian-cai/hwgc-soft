@@ -31,7 +31,7 @@ impl GlobalContext {
             objs: AtomicU64::new(0),
             edges: AtomicU64::new(0),
             ne_edges: AtomicU64::new(0),
-            cap: AtomicUsize::new(4096),
+            cap: AtomicUsize::new(1024),
         }
     }
 
