@@ -16,40 +16,54 @@ use std::{
 static mut ROOTS: Option<*const [u64]> = None;
 
 struct TracePacket<O: ObjectModel> {
+    space: usize,
     slots: Vec<Slot>,
-    next_slots: Vec<Slot>,
+    next_slots: [Vec<Slot>; 2],
     _p: PhantomData<O>,
 }
 
 impl<O: ObjectModel> TracePacket<O> {
-    fn new(slots: Vec<Slot>) -> Self {
+    fn new(slots: Vec<Slot>, space: usize) -> Self {
         Self {
+            space,
             slots,
-            next_slots: Vec::new(),
+            next_slots: [Vec::new(), Vec::new()],
             _p: PhantomData,
         }
     }
 
-    fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
-        if !self.next_slots.is_empty() {
-            let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots));
+    fn flush_one(&mut self, local: &Worker<Box<dyn Packet>>, index: usize) {
+        if !self.next_slots[index].is_empty() {
+            let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots[index]), index);
             local.push(Box::new(next));
         }
+    }
+
+    fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
+        self.flush_one(local, 0);
+        self.flush_one(local, 1);
     }
 
     fn scan_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
         local.objs += 1;
         o.scan::<O, _>(|s| {
-            let Some(c) = s.load() else { return };
+            let Some(c) = s.load() else {
+                local.slots += 1;
+                return;
+            };
             if c.is_marked(mark_state) {
+                local.slots += 1;
+                local.ne_slots += 1;
                 return;
             }
-            if self.next_slots.is_empty() {
-                self.next_slots.reserve(cap);
+            let is_los = c.space_id() != 0x2;
+            let next_slots = &mut self.next_slots[is_los as usize];
+            if next_slots.is_empty() {
+                next_slots.reserve(cap);
             }
-            self.next_slots.push(s);
-            if self.next_slots.len() >= cap {
-                self.flush(&local.queue);
+            next_slots.push(s);
+            if next_slots.len() >= cap {
+                self.flush_one(&local.queue, is_los as usize);
             }
         });
     }
@@ -88,7 +102,7 @@ impl<O: ObjectModel> TracePacket<O> {
         self.scan_object(o, local, mark_state, cap);
     }
 
-    fn trace_object(
+    fn trace_object_generic(
         &mut self,
         slot: Slot,
         o: Object,
@@ -108,12 +122,25 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let capacity = GLOBAL.cap();
         let mark_state = local.global.mark_state();
-        for slot in std::mem::take(&mut self.slots) {
-            local.slots += 1;
-            if let Some(o) = slot.load() {
-                self.trace_object(slot, o, local, mark_state, capacity);
+        let slots = std::mem::take(&mut self.slots);
+        local.slots += slots.len() as u64;
+        local.ne_slots += slots.len() as u64;
+        if cfg!(feature = "no_space_dispatch") {
+            if self.space == 0 {
+                for slot in slots {
+                    let o = slot.load().unwrap();
+                    self.trace_forward_object(slot, o, local, mark_state, capacity);
+                }
             } else {
-                local.ne_slots += 1;
+                for slot in slots {
+                    let o = slot.load().unwrap();
+                    self.trace_mark_object(o, local, mark_state, capacity);
+                }
+            }
+        } else {
+            for slot in slots {
+                let o = slot.load().unwrap();
+                self.trace_object_generic(slot, o, local, mark_state, capacity);
             }
         }
         self.flush(&local.queue);
@@ -137,29 +164,35 @@ impl<O: ObjectModel> ScanRoots<O> {
 impl<O: ObjectModel> Packet for ScanRoots<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let capacity = GLOBAL.cap();
-        let mut buf = vec![];
+        let mut bufs = [vec![], vec![]];
         let Some(roots) = (unsafe { ROOTS }) else {
             unreachable!()
         };
         let roots = unsafe { &*roots };
         for root in &roots[self.range.clone()] {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
-            if slot.load().is_none() {
+            let Some(o) = slot.load() else {
                 local.slots += 1;
                 continue;
-            }
+            };
+            let is_los = o.space_id() != 0x2;
+            let buf = &mut bufs[is_los as usize];
             if buf.is_empty() {
                 buf.reserve(capacity);
             }
             buf.push(slot);
             if buf.len() >= capacity {
-                let packet = TracePacket::<O>::new(buf);
+                let packet = TracePacket::<O>::new(std::mem::take(buf), is_los as usize);
                 local.queue.push(Box::new(packet));
-                buf = vec![];
+                bufs[is_los as usize] = vec![];
             }
         }
-        if !buf.is_empty() {
-            let packet = TracePacket::<O>::new(buf);
+        if !bufs[0].is_empty() {
+            let packet = TracePacket::<O>::new(std::mem::take(&mut bufs[0]), 0);
+            local.queue.push(Box::new(packet));
+        }
+        if !bufs[1].is_empty() {
+            let packet = TracePacket::<O>::new(std::mem::take(&mut bufs[1]), 1);
             local.queue.push(Box::new(packet));
         }
     }
