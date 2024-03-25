@@ -1,3 +1,4 @@
+# running runbms -p snap-forwarding ./results ./scripts/forwarding.yml
 
 includes:
   - "./runbms-base.yml"
