@@ -8,6 +8,8 @@ use std::sync::{
     Arc,
 };
 
+use super::fake_forwarding::LocalAllocator;
+
 pub trait Packet: Send {
     fn run(&mut self, local: &mut WPWorker);
 }
@@ -62,6 +64,7 @@ pub struct WPWorker {
     pub objs: u64,
     pub slots: u64,
     pub ne_slots: u64,
+    pub copy: LocalAllocator,
 }
 
 impl crate::util::workers::Worker for WPWorker {
@@ -76,6 +79,7 @@ impl crate::util::workers::Worker for WPWorker {
             objs: 0,
             slots: 0,
             ne_slots: 0,
+            copy: LocalAllocator::new(),
         }
     }
 
@@ -84,6 +88,7 @@ impl crate::util::workers::Worker for WPWorker {
     }
 
     fn run_epoch(&mut self) {
+        self.copy.reset();
         self.objs = 0;
         self.slots = 0;
         self.ne_slots = 0;

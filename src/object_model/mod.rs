@@ -35,5 +35,5 @@ mod bidirectional;
 mod header;
 mod openjdk;
 pub use bidirectional::BidirectionalObjectModel;
-pub use header::Header;
-pub use openjdk::OpenJDKObjectModel;
+pub use header::{FarwardingState, Header};
+pub use openjdk::{OpenJDKObjectModel, Tib as JDKTib};

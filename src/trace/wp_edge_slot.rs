@@ -1,8 +1,9 @@
 use crossbeam::deque::Worker;
 
 use super::TracingStats;
+use crate::util::fake_forwarding::TO_SPACE;
 use crate::util::tracer::Tracer;
-use crate::util::typed_obj::Slot;
+use crate::util::typed_obj::{Object, Slot};
 use crate::util::workers::WorkerGroup;
 use crate::util::wp::{Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
@@ -35,6 +36,70 @@ impl<O: ObjectModel> TracePacket<O> {
             local.push(Box::new(next));
         }
     }
+
+    fn scan_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
+        local.objs += 1;
+        o.scan::<O, _>(|s| {
+            let Some(c) = s.load() else { return };
+            if c.is_marked(mark_state) {
+                return;
+            }
+            if self.next_slots.is_empty() {
+                self.next_slots.reserve(cap);
+            }
+            self.next_slots.push(s);
+            if self.next_slots.len() >= cap {
+                self.flush(&local.queue);
+            }
+        });
+    }
+
+    fn trace_mark_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
+        let marked = if cfg!(feature = "relaxed_mark") {
+            o.mark_relaxed(mark_state)
+        } else {
+            o.mark(mark_state)
+        };
+        if marked {
+            self.scan_object(o, local, mark_state, cap)
+        }
+    }
+
+    fn trace_forward_object(
+        &mut self,
+        slot: Slot,
+        o: Object,
+        local: &mut WPWorker,
+        mark_state: u8,
+        cap: usize,
+    ) {
+        let old_state = o.attempt_to_forward(mark_state);
+        if old_state.is_forwarded_or_being_forwarded() {
+            let fwd = o.spin_and_get_farwarded_object(mark_state);
+            slot.volatile_store(fwd);
+            return;
+        }
+        o.mark_relaxed(mark_state);
+        self.scan_object(o, local, mark_state, cap);
+        let _farwarded = local.copy.copy_object::<O>(o);
+        slot.volatile_store(o);
+        o.set_as_forwarded(mark_state);
+    }
+
+    fn trace_object(
+        &mut self,
+        slot: Slot,
+        o: Object,
+        local: &mut WPWorker,
+        mark_state: u8,
+        cap: usize,
+    ) {
+        if cfg!(feature = "forwarding") && o.space_id() == 0x2 {
+            self.trace_forward_object(slot, o, local, mark_state, cap)
+        } else {
+            self.trace_mark_object(o, local, mark_state, cap)
+        }
+    }
 }
 
 impl<O: ObjectModel> Packet for TracePacket<O> {
@@ -44,27 +109,7 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
         for slot in std::mem::take(&mut self.slots) {
             local.slots += 1;
             if let Some(o) = slot.load() {
-                let marked = if cfg!(feature = "relaxed_mark") {
-                    o.mark_relaxed(mark_state)
-                } else {
-                    o.mark(mark_state)
-                };
-                if marked {
-                    local.objs += 1;
-                    o.scan::<O, _>(|s| {
-                        let Some(c) = s.load() else { return };
-                        if c.is_marked(mark_state) {
-                            return;
-                        }
-                        if self.next_slots.is_empty() {
-                            self.next_slots.reserve(capacity);
-                        }
-                        self.next_slots.push(s);
-                        if self.next_slots.len() >= capacity {
-                            self.flush(&local.queue);
-                        }
-                    });
-                }
+                self.trace_object(slot, o, local, mark_state, capacity);
             } else {
                 local.ne_slots += 1;
             }
@@ -132,6 +177,7 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
     fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
         GLOBAL.reset();
         GLOBAL.mark_state.store(mark_sense, Ordering::SeqCst);
+        TO_SPACE.reset();
         // Create initial root scanning packets
         let roots = object_model.roots();
         let roots_len = roots.len();

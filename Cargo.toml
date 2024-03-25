@@ -48,6 +48,7 @@ zsim = []
 detailed_stats = []
 single_thread = []
 relaxed_mark = []
+forwarding = []
 
 [profile.release]
 # lto = true

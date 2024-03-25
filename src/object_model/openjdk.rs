@@ -19,6 +19,7 @@ pub struct Tib {
     ttype: TibType,
     oop_map_blocks: Vec<OopMapBlock>,
     instance_mirror_info: Option<(u64, u64)>,
+    pub scalar_size: Option<usize>,
 }
 
 impl HasTibType for Tib {
@@ -150,6 +151,7 @@ impl Tib {
                 ttype: TibType::ObjArray,
                 oop_map_blocks: vec![],
                 instance_mirror_info: None,
+                scalar_size: None,
             },
             if AE {
                 Some(AlignmentEncodingPattern::RefArray as u8)
@@ -217,6 +219,12 @@ impl Tib {
         let ombs = Self::encode_oop_map_blocks(obj);
         // println!("{:?}", ombs);
         let sum: u64 = ombs.iter().map(|omb| omb.count).sum();
+        let size_in_header = obj.edges.is_empty() && obj.size > 16;
+        let scalar_size = if !size_in_header {
+            Some(obj.size as usize)
+        } else {
+            None
+        };
 
         // println!("ret: {:?} {:?}", ret,  Arc::as_ptr(&ret));
         if let Some(start) = obj.instance_mirror_start {
@@ -232,6 +240,7 @@ impl Tib {
                     ttype: TibType::InstanceMirror,
                     oop_map_blocks: ombs,
                     instance_mirror_info: Some((start, count)),
+                    scalar_size,
                 },
                 align_code,
             )
@@ -247,6 +256,7 @@ impl Tib {
                     ttype: TibType::Ordinary,
                     oop_map_blocks: ombs,
                     instance_mirror_info: None,
+                    scalar_size,
                 },
                 align_code,
             )
@@ -269,7 +279,7 @@ impl Tib {
         let mut num_edges = 0;
         match tib.ttype {
             TibType::ObjArray => {
-                let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
+                let objarray_length = (*((o as *mut u64).wrapping_add(2) as *const u64) - 24) >> 3;
                 // println!("Objarray length: {}", objarray_length);
                 callback((o as *mut u64).wrapping_add(3), objarray_length);
                 num_edges += objarray_length;
@@ -323,7 +333,7 @@ impl Tib {
                 Self::scan_object_fallback(tib, o, callback);
             }
             AlignmentEncodingPattern::RefArray => {
-                let objarray_length = *((o as *mut u64).wrapping_add(2) as *const u64);
+                let objarray_length = (*((o as *mut u64).wrapping_add(2) as *const u64) - 24) >> 3;
                 callback((o as *mut u64).wrapping_add(3), objarray_length);
             }
             AlignmentEncodingPattern::NoRef => {}
@@ -438,10 +448,15 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
             unsafe {
                 std::ptr::write::<u64>((o.start + 8) as *mut u64, tib_ptr as u64);
             }
-            // Write out array length for obj array
+            // Write out array length for obj array and objects without oop fields
             if let Some(l) = o.objarray_length {
                 unsafe {
-                    std::ptr::write::<u64>((o.start + 16) as *mut u64, l);
+                    debug_assert_eq!(o.size, (l << 3) + 24);
+                    std::ptr::write::<u64>((o.start + 16) as *mut u64, o.size);
+                }
+            } else if o.edges.is_empty() && o.size > 16 {
+                unsafe {
+                    std::ptr::write::<u64>((o.start + 16) as *mut u64, o.size);
                 }
             }
             // Write out each non-zero ref field
