@@ -2,7 +2,9 @@
 
 set -ex
 
-rm -r ./builds
+rm -rf ./builds
+
+mkdir -p ./builds
 
 cargo build --release --features forwarding
 
