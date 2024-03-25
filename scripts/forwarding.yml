@@ -1,0 +1,7 @@
+
+includes:
+  - "./runbms-base.yml"
+
+configs:
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot2"
+  - "native|run_build-all_in_one_no_space_dispatch|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot2"
