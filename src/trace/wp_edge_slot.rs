@@ -79,11 +79,13 @@ impl<O: ObjectModel> TracePacket<O> {
             slot.volatile_store(fwd);
             return;
         }
-        o.mark_relaxed(mark_state);
-        self.scan_object(o, local, mark_state, cap);
+        // copy
         let _farwarded = local.copy.copy_object::<O>(o);
         slot.volatile_store(o);
         o.set_as_forwarded(mark_state);
+        // scan
+        o.mark_relaxed(mark_state);
+        self.scan_object(o, local, mark_state, cap);
     }
 
     fn trace_object(

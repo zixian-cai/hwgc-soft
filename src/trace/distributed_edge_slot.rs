@@ -1,6 +1,11 @@
 use super::TracingStats;
 use crate::{
-    util::{tracer::Tracer, typed_obj::Slot, workers::WorkerGroup},
+    util::{
+        fake_forwarding::{LocalAllocator, TO_SPACE},
+        tracer::Tracer,
+        typed_obj::{Object, Slot},
+        workers::WorkerGroup,
+    },
     ObjectModel, TraceArgs,
 };
 use crossbeam::queue::SegQueue;
@@ -121,6 +126,7 @@ pub struct TracingWorker<O: ObjectModel> {
     global: Arc<GlobalContext>,
     counters: Counters,
     slots: usize,
+    copy: LocalAllocator,
     _p: PhantomData<O>,
 }
 
@@ -143,14 +149,14 @@ impl<O: ObjectModel> TracingWorker<O> {
                     .slept
                     .store(true, Ordering::SeqCst);
                 let old = self.global.yielded.fetch_add(1, Ordering::Relaxed);
-                let ms = self.global.elapsed();
-                println!(
-                    "[{:.3}] Thread {} Sleep total={} slots={}",
-                    ms,
-                    self.id,
-                    old + 1,
-                    self.slots
-                );
+                let _ms = self.global.elapsed();
+                // println!(
+                //     "[{:.3}] Thread {} Sleep total={} slots={}",
+                //     ms,
+                //     self.id,
+                //     old + 1,
+                //     self.slots
+                // );
                 self.slots = 0;
                 if old + 1 == NUM_THREADS {
                     self.global.gc_finished.store(true, Ordering::SeqCst);
@@ -179,30 +185,55 @@ impl<O: ObjectModel> TracingWorker<O> {
         false
     }
 
+    fn scan_object(&mut self, o: Object, mark_sense: u8) {
+        self.counters.marked_objects += 1;
+        o.scan::<O, _>(|s| {
+            self.counters.slots += 1;
+            let Some(child) = s.load() else {
+                return;
+            };
+            self.counters.non_empty_slots += 1;
+            if child.is_marked(mark_sense) {
+                return;
+            }
+            let owner = get_owner_thread(child.raw());
+            if owner == self.id {
+                self.queue.push_back(s);
+            } else {
+                self.global.queues[self.id][owner].enq(s);
+                self.notify_threads[owner] = true;
+            }
+        })
+    }
+
+    fn trace_forward_object(&mut self, _slot: Slot, o: Object, mark_sense: u8) {
+        // let old_state = o.attempt_to_forward(mark_sense);
+        // if old_state.is_forwarded_or_being_forwarded() {
+        //     let fwd = o.spin_and_get_farwarded_object(mark_sense);
+        //     slot.volatile_store(fwd);
+        //     return;
+        // }
+        if o.mark_relaxed(mark_sense) {
+            let _farwarded = self.copy.copy_object::<O>(o);
+            o.set_as_forwarded(mark_sense);
+            self.scan_object(o, mark_sense);
+        }
+    }
+
+    fn trace_mark_object(&mut self, o: Object, mark_sense: u8) {
+        if o.mark_relaxed(mark_sense) {
+            self.scan_object(o, mark_sense)
+        }
+    }
+
     fn process_slot(&mut self, slot: Slot, mark_sense: u8) {
         let o = slot.load().unwrap();
         debug_assert_eq!(get_owner_thread(o.raw()), self.id);
         self.slots += 1;
-        // self.iter_slots += 1;
-        if o.mark_relaxed(mark_sense) {
-            self.counters.marked_objects += 1;
-            o.scan::<O, _>(|s| {
-                self.counters.slots += 1;
-                let Some(child) = s.load() else {
-                    return;
-                };
-                self.counters.non_empty_slots += 1;
-                if child.is_marked(mark_sense) {
-                    return;
-                }
-                let owner = get_owner_thread(child.raw());
-                if owner == self.id {
-                    self.queue.push_back(s);
-                } else {
-                    self.global.queues[self.id][owner].enq(s);
-                    self.notify_threads[owner] = true;
-                }
-            })
+        if cfg!(feature = "forwarding") && o.space_id() == 0x2 {
+            self.trace_forward_object(slot, o, mark_sense);
+        } else {
+            self.trace_mark_object(o, mark_sense);
         }
     }
 }
@@ -218,6 +249,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for TracingWorker<O> {
             global: GLOBAL.clone(),
             counters: Default::default(),
             slots: 0,
+            copy: LocalAllocator::new(),
             _p: PhantomData,
         }
     }
@@ -363,6 +395,7 @@ impl<O: ObjectModel> Tracer<O> for DistEdgeSlotTracer<O> {
     }
 
     fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
+        TO_SPACE.reset();
         GLOBAL.reset();
         GLOBAL.mark_state.store(mark_sense, Ordering::SeqCst);
         // Create initial root scanning tasks
