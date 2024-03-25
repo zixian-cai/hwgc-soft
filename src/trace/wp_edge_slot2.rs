@@ -15,10 +15,16 @@ use std::{
 
 static mut ROOTS: Option<*const [u64]> = None;
 
+const NUM_QUEUES: usize = if cfg!(feature = "no_space_dispatch") {
+    2
+} else {
+    1
+};
+
 struct TracePacket<O: ObjectModel> {
     space: usize,
     slots: Vec<Slot>,
-    next_slots: [Vec<Slot>; 2],
+    next_slots: Vec<Vec<Slot>>,
     _p: PhantomData<O>,
 }
 
@@ -27,7 +33,7 @@ impl<O: ObjectModel> TracePacket<O> {
         Self {
             space,
             slots,
-            next_slots: [Vec::new(), Vec::new()],
+            next_slots: (0..NUM_QUEUES).map(|_| Vec::new()).collect::<Vec<_>>(),
             _p: PhantomData,
         }
     }
@@ -40,8 +46,17 @@ impl<O: ObjectModel> TracePacket<O> {
     }
 
     fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
-        self.flush_one(local, 0);
-        self.flush_one(local, 1);
+        for i in 0..NUM_QUEUES {
+            self.flush_one(local, i);
+        }
+    }
+
+    fn get_queue_index(o: Object) -> usize {
+        if cfg!(feature = "no_space_dispatch") {
+            (o.space_id() != 0x2) as usize
+        } else {
+            0
+        }
     }
 
     fn scan_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
@@ -56,14 +71,14 @@ impl<O: ObjectModel> TracePacket<O> {
                 local.ne_slots += 1;
                 return;
             }
-            let is_los = c.space_id() != 0x2;
-            let next_slots = &mut self.next_slots[is_los as usize];
+            let index = Self::get_queue_index(c);
+            let next_slots = &mut self.next_slots[index];
             if next_slots.is_empty() {
                 next_slots.reserve(cap);
             }
             next_slots.push(s);
             if next_slots.len() >= cap {
-                self.flush_one(&local.queue, is_los as usize);
+                self.flush_one(&local.queue, index);
             }
         });
     }
@@ -164,7 +179,7 @@ impl<O: ObjectModel> ScanRoots<O> {
 impl<O: ObjectModel> Packet for ScanRoots<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let capacity = GLOBAL.cap();
-        let mut bufs = [vec![], vec![]];
+        let mut bufs = (0..NUM_QUEUES).map(|_| Vec::new()).collect::<Vec<_>>();
         let Some(roots) = (unsafe { ROOTS }) else {
             unreachable!()
         };
@@ -175,25 +190,23 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
                 local.slots += 1;
                 continue;
             };
-            let is_los = o.space_id() != 0x2;
-            let buf = &mut bufs[is_los as usize];
+            let index = TracePacket::<O>::get_queue_index(o);
+            let buf = &mut bufs[index];
             if buf.is_empty() {
                 buf.reserve(capacity);
             }
             buf.push(slot);
             if buf.len() >= capacity {
-                let packet = TracePacket::<O>::new(std::mem::take(buf), is_los as usize);
+                let packet = TracePacket::<O>::new(std::mem::take(buf), index);
                 local.queue.push(Box::new(packet));
-                bufs[is_los as usize] = vec![];
+                bufs[index] = vec![];
             }
         }
-        if !bufs[0].is_empty() {
-            let packet = TracePacket::<O>::new(std::mem::take(&mut bufs[0]), 0);
-            local.queue.push(Box::new(packet));
-        }
-        if !bufs[1].is_empty() {
-            let packet = TracePacket::<O>::new(std::mem::take(&mut bufs[1]), 1);
-            local.queue.push(Box::new(packet));
+        for i in 0..NUM_QUEUES {
+            if !bufs[i].is_empty() {
+                let packet = TracePacket::<O>::new(std::mem::take(&mut bufs[i]), i);
+                local.queue.push(Box::new(packet));
+            }
         }
     }
 }
