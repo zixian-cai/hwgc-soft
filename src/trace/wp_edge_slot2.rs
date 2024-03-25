@@ -102,11 +102,19 @@ impl<O: ObjectModel> TracePacket<O> {
         mark_state: u8,
         cap: usize,
     ) {
-        let old_state = o.attempt_to_forward(mark_state);
-        if old_state.is_forwarded_or_being_forwarded() {
-            let fwd = o.spin_and_get_farwarded_object(mark_state);
-            slot.volatile_store(fwd);
-            return;
+        if cfg!(feature = "atomic_free_farwarding") {
+            if o.is_forwarded_or_being_forwarded(mark_state) {
+                slot.volatile_store(o);
+                return;
+            }
+            o.set_as_forwarded(mark_state);
+        } else {
+            let old_state = o.attempt_to_forward(mark_state);
+            if old_state.is_forwarded_or_being_forwarded() {
+                let fwd = o.spin_and_get_farwarded_object(mark_state);
+                slot.volatile_store(fwd);
+                return;
+            }
         }
         // copy
         let _farwarded = local.copy.copy_object::<O>(o);

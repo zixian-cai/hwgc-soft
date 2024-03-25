@@ -64,6 +64,18 @@ impl Header {
             .is_ok()
     }
 
+    pub fn is_forwarded(o: u64, forwarded_state: u8) -> bool {
+        let byte = unsafe { &*(o as *const u64 as *const AtomicU8).add(7) };
+        let state = byte.load(Ordering::Relaxed);
+        state == forwarded_state
+    }
+
+    pub fn is_forwarded_or_being_forwarded(o: u64, forwarded_state: u8) -> bool {
+        let byte = unsafe { &*(o as *const u64 as *const AtomicU8).add(7) };
+        let state = byte.load(Ordering::Relaxed);
+        state == forwarded_state || state == 0xff
+    }
+
     pub fn attempt_to_forward(o: u64, forwarded_state: u8) -> FarwardingState {
         let byte = unsafe { &*(o as *const u64 as *const AtomicU8).add(7) };
         let old_byte = byte.load(Ordering::SeqCst);

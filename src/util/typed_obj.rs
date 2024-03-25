@@ -79,6 +79,15 @@ impl Object {
         Header::attempt_to_forward(self.raw(), mark_state)
     }
 
+    #[allow(unused)]
+    pub fn is_forwarded(&self, mark_state: u8) -> bool {
+        Header::is_forwarded(self.raw(), mark_state)
+    }
+
+    pub fn is_forwarded_or_being_forwarded(&self, mark_state: u8) -> bool {
+        Header::is_forwarded_or_being_forwarded(self.raw(), mark_state)
+    }
+
     pub fn spin_and_get_farwarded_object(&self, mark_state: u8) -> Object {
         let o = Header::spin_and_get_farwarded_object(self.raw(), mark_state);
         Object(o)

@@ -50,6 +50,7 @@ single_thread = []
 relaxed_mark = []
 forwarding = []
 no_space_dispatch = []
+atomic_free_farwarding = []
 
 [profile.release]
 # lto = true
