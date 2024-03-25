@@ -20,6 +20,7 @@ pub enum TracingLoopChoice {
     DistributedEdgeSlot,
     ShapeCache,
     WPEdgeSlot,
+    WPEdgeSlot2,
     WPEdgeSlotDual,
     ParEdgeSlot,
     ParEdgeSlot2,
@@ -88,6 +89,7 @@ fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>>
     match args.tracing_loop {
         TracingLoopChoice::EdgeSlot => Some(edge_slot::create_tracer::<O>()),
         TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
+        TracingLoopChoice::WPEdgeSlot2 => Some(wp_edge_slot::create_tracer::<O>(args)),
         TracingLoopChoice::WPEdgeSlotDual => Some(wp_edge_slot_dual::create_tracer::<O>(args)),
         TracingLoopChoice::ParEdgeSlot => Some(par_edge_slot::create_tracer::<O>(args)),
         TracingLoopChoice::ParEdgeSlot2 => Some(par_edge_slot2::create_tracer::<O>(args)),
@@ -127,12 +129,7 @@ fn transitive_closure<O: ObjectModel>(
                 object_model,
                 shape_cache,
             ),
-            TracingLoopChoice::WPEdgeSlot
-            | TracingLoopChoice::WPEdgeSlotDual
-            | TracingLoopChoice::ParEdgeSlot
-            | TracingLoopChoice::ParEdgeSlot2
-            | TracingLoopChoice::DistributedEdgeSlot
-            | TracingLoopChoice::EdgeSlot => {
+            _ => {
                 if let Some(tracer) = tracer {
                     tracer.trace(mark_sense, object_model)
                 } else {
