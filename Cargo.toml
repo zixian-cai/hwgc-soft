@@ -67,6 +67,26 @@ harness = false
 name = "tradesoap"
 harness = false
 
+[[bench]]
+name = "avrora"
+harness = false
+
+[[bench]]
+name = "biojava"
+harness = false
+
+[[bench]]
+name = "cassandra"
+harness = false
+
+[[bench]]
+name = "eclipse"
+harness = false
+
+[[bench]]
+name = "lusearch"
+harness = false
+
 [package.metadata.harness.profiles.default.builds]
 edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
 # dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" }, features = [
@@ -86,3 +106,11 @@ wp_edge_slot_relaxed = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
     "relaxed_mark",
 ] }
 # dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" } }
+
+
+[package.metadata.harness.profiles.fwd.builds]
+wp = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = ["forwarding"] }
+wp_s = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = [
+    "forwarding",
+    "no_space_dispatch",
+] }
