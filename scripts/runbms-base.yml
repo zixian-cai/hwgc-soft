@@ -2,7 +2,7 @@ includes:
   - "$RUNNING_NG_PACKAGE_DATA/base/runbms-anu.yml"
 
 overrides:
-  "invocations": 20
+  "invocations": 40
 
 suites:
   heapdump:
