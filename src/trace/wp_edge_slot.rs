@@ -1,5 +1,3 @@
-use crossbeam::deque::Worker;
-
 use super::TracingStats;
 use crate::util::fake_forwarding::TO_SPACE;
 use crate::util::tracer::Tracer;
@@ -30,10 +28,10 @@ impl<O: ObjectModel> TracePacket<O> {
         }
     }
 
-    fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
+    fn flush(&mut self, local: &mut WPWorker) {
         if !self.next_slots.is_empty() {
             let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots));
-            local.push(Box::new(next));
+            local.add(Box::new(next));
         }
     }
 
@@ -49,7 +47,7 @@ impl<O: ObjectModel> TracePacket<O> {
             }
             self.next_slots.push(s);
             if self.next_slots.len() >= cap {
-                self.flush(&local.queue);
+                self.flush(local);
             }
         });
     }
@@ -116,7 +114,7 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
                 local.ne_slots += 1;
             }
         }
-        self.flush(&local.queue);
+        self.flush(local);
     }
 }
 
@@ -154,13 +152,13 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
             buf.push(slot);
             if buf.len() >= capacity {
                 let packet = TracePacket::<O>::new(buf);
-                local.queue.push(Box::new(packet));
+                local.add(Box::new(packet));
                 buf = vec![];
             }
         }
         if !buf.is_empty() {
             let packet = TracePacket::<O>::new(buf);
-            local.queue.push(Box::new(packet));
+            local.add(Box::new(packet));
         }
     }
 }

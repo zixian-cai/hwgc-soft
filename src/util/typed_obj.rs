@@ -12,6 +12,7 @@ unsafe impl Send for Slot {}
 unsafe impl Sync for Slot {}
 
 impl Slot {
+    #[allow(unused)]
     pub const fn raw(&self) -> *mut u64 {
         self.0
     }

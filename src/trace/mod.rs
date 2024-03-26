@@ -33,6 +33,8 @@ pub struct TracingStats {
     pub non_empty_slots: u64,
     pub sends: u64,
     pub copied_objects: u64,
+    pub packets: u64,
+    pub total_run_time_us: u64,
     pub(crate) shape_cache_stats: ShapeCacheStats,
 }
 

@@ -1,4 +1,4 @@
-use crossbeam::deque::Worker;
+use smallvec::SmallVec;
 
 use super::TracingStats;
 use crate::util::fake_forwarding::TO_SPACE;
@@ -15,21 +15,18 @@ use std::{
 
 static mut ROOTS: Option<*const [u64]> = None;
 
-const NUM_QUEUES: usize = if cfg!(feature = "no_space_dispatch") {
-    2
-} else {
-    1
-};
+const SMALL_VEC_SIZE: usize = 32;
+const NUM_QUEUES: usize = 2;
 
 struct TracePacket<O: ObjectModel> {
-    slots: [Vec<Slot>; NUM_QUEUES],
-    next_slots: [Vec<Slot>; NUM_QUEUES],
+    slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES],
+    next_slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES],
     next_len: usize,
     _p: PhantomData<O>,
 }
 
 impl<O: ObjectModel> TracePacket<O> {
-    fn new(slots: [Vec<Slot>; NUM_QUEUES]) -> Self {
+    fn new(slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES]) -> Self {
         Self {
             slots,
             next_slots: Default::default(),
@@ -38,11 +35,12 @@ impl<O: ObjectModel> TracePacket<O> {
         }
     }
 
-    fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
+    fn flush(&mut self, local: &mut WPWorker) {
         if self.next_len > 0 {
+            assert_eq!(self.next_len, self.next_slots.iter().map(|s| s.len()).sum());
             let next_slots = std::mem::take(&mut self.next_slots);
             let next = TracePacket::<O>::new(next_slots);
-            local.push(Box::new(next));
+            local.add(Box::new(next));
             self.next_len = 0;
         }
     }
@@ -70,13 +68,13 @@ impl<O: ObjectModel> TracePacket<O> {
             }
             let index = Self::get_queue_index(c);
             let next_slots = &mut self.next_slots[index];
-            if next_slots.is_empty() {
-                next_slots.reserve(cap);
+            if next_slots.len() >= SMALL_VEC_SIZE {
+                next_slots.reserve(cap - SMALL_VEC_SIZE);
             }
             next_slots.push(s);
             self.next_len += 1;
             if self.next_len >= cap {
-                self.flush(&local.queue);
+                self.flush(local);
             }
         });
     }
@@ -153,6 +151,7 @@ impl<O: ObjectModel> TracePacket<O> {
 
 impl<O: ObjectModel> Packet for TracePacket<O> {
     fn run(&mut self, local: &mut WPWorker) {
+        local.packets += 1;
         let capacity = GLOBAL.cap();
         let mark_state = local.global.mark_state();
         let mut slots = std::mem::take(&mut self.slots);
@@ -177,7 +176,7 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
                 }
             }
         }
-        self.flush(&local.queue);
+        self.flush(local);
     }
 }
 
@@ -198,7 +197,7 @@ impl<O: ObjectModel> ScanRoots<O> {
 impl<O: ObjectModel> Packet for ScanRoots<O> {
     fn run(&mut self, local: &mut WPWorker) {
         let capacity = GLOBAL.cap();
-        let mut slots: [Vec<Slot>; NUM_QUEUES] = Default::default();
+        let mut slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES] = Default::default();
         let mut count = 0;
         let Some(roots) = (unsafe { ROOTS }) else {
             unreachable!()
@@ -212,20 +211,20 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
             };
             let index = TracePacket::<O>::get_queue_index(o);
             let buf = &mut slots[index];
-            if buf.is_empty() {
-                buf.reserve(capacity);
+            if buf.len() >= SMALL_VEC_SIZE {
+                buf.reserve(capacity - SMALL_VEC_SIZE);
             }
             buf.push(slot);
             count += 1;
             if count >= capacity {
                 let packet = TracePacket::<O>::new(std::mem::take(&mut slots));
-                local.queue.push(Box::new(packet));
+                local.add(Box::new(packet));
                 count = 0;
             }
         }
         if count > 0 {
             let packet = TracePacket::<O>::new(std::mem::take(&mut slots));
-            local.queue.push(Box::new(packet));
+            local.add(Box::new(packet));
         }
     }
 }

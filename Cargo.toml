@@ -34,13 +34,15 @@ polars = { version = "0.37", features = ["diagonal_concat", "parquet"] }
 lru = "0.12"
 once_cell = "1.19.0"
 num_cpus = "1.16.0"
+smallvec = "1.13.2"
+harness-probe-perf = "0.0.3"
 
 [build-dependencies]
 prost-build = { version = "0.11" }
 built = { version = "0.7.1", features = ["git2"] }
 
 [dev-dependencies]
-harness = "0.0.3"
+harness = "0.0.5"
 
 [features]
 m5 = []
@@ -109,8 +111,15 @@ wp_edge_slot_relaxed = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
 
 
 [package.metadata.harness.profiles.fwd.builds]
-wp = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = ["forwarding"] }
+wp = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = [
+    "forwarding",
+    # "single_thread",
+] }
 wp_s = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = [
     "forwarding",
+    # "single_thread",
     "no_space_dispatch",
 ] }
+
+# [package.metadata.harness.profiles.fwd.probes]
+# harness-probe-perf = { events = "PERF_COUNT_HW_CPU_CYCLES,PERF_COUNT_HW_INSTRUCTIONS,PERF_COUNT_HW_CACHE_L1D:MISS,PERF_COUNT_HW_CACHE_DTLB:MISS" }
