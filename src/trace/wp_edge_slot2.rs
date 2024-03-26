@@ -16,7 +16,7 @@ use std::{
 static mut ROOTS: Option<*const [u64]> = None;
 
 const NUM_QUEUES: usize = if cfg!(feature = "no_space_dispatch") {
-    1
+    2
 } else {
     1
 };
@@ -68,7 +68,8 @@ impl<O: ObjectModel> TracePacket<O> {
                 local.ne_slots += 1;
                 return;
             }
-            let next_slots = &mut self.next_slots[0];
+            let index = Self::get_queue_index(c);
+            let next_slots = &mut self.next_slots[index];
             if next_slots.is_empty() {
                 next_slots.reserve(cap);
             }
@@ -119,6 +120,16 @@ impl<O: ObjectModel> TracePacket<O> {
         let _farwarded = local.copy.copy_object::<O>(o);
         slot.volatile_store(o);
         o.set_as_forwarded(mark_state);
+        local.copied_objects += 1;
+        // Add complexity: touch every byte
+        let size = o.size::<O>();
+        for i in 8..size {
+            unsafe {
+                let ptr = (o.raw() as *mut u8).add(i);
+                let v = std::ptr::read_volatile(ptr);
+                std::ptr::write_volatile(ptr, v);
+            }
+        }
         // scan
         o.mark_relaxed(mark_state);
         self.scan_object(o, local, mark_state, cap);
@@ -150,19 +161,12 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
             local.ne_slots += slots[i].len() as u64;
         }
         if cfg!(feature = "no_space_dispatch") {
-            let slots = std::mem::take(&mut slots[0]);
-            for slot in &slots {
+            for slot in std::mem::take(&mut slots[0]) {
                 let o = slot.load().unwrap();
-                if Self::get_queue_index(o) != 0 {
-                    continue;
-                }
-                self.trace_forward_object(*slot, o, local, mark_state, capacity);
+                self.trace_forward_object(slot, o, local, mark_state, capacity);
             }
-            for slot in &slots {
+            for slot in std::mem::take(&mut slots[1]) {
                 let o = slot.load().unwrap();
-                if Self::get_queue_index(o) != 1 {
-                    continue;
-                }
                 self.trace_mark_object(o, local, mark_state, capacity);
             }
         } else {
@@ -206,8 +210,8 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
                 local.slots += 1;
                 continue;
             };
-            // let index = TracePacket::<O>::get_queue_index(o);
-            let buf = &mut slots[0];
+            let index = TracePacket::<O>::get_queue_index(o);
+            let buf = &mut slots[index];
             if buf.is_empty() {
                 buf.reserve(capacity);
             }
@@ -253,12 +257,7 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         }
         // Wake up workers
         self.group.run_epoch();
-        TracingStats {
-            marked_objects: GLOBAL.objs.load(Ordering::SeqCst),
-            slots: GLOBAL.edges.load(Ordering::SeqCst),
-            non_empty_slots: GLOBAL.ne_edges.load(Ordering::SeqCst),
-            ..Default::default()
-        }
+        GLOBAL.get_stats()
     }
 
     fn teardown(&self) {
