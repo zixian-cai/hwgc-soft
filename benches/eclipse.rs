@@ -31,4 +31,5 @@ fn eclipse(b: &Bencher) {
     b.add_stat("marked_objects", stats.marked_objects as u64);
     b.add_stat("slots", stats.slots as u64);
     b.add_stat("non_empty_slots", stats.non_empty_slots as u64);
+    b.add_stat("copied_objects", stats.copied_objects as u64);
 }

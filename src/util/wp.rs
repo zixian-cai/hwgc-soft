@@ -1,3 +1,4 @@
+use crate::trace::TracingStats;
 use crate::util::workers::WorkerGroup;
 use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use once_cell::sync::Lazy;
@@ -20,6 +21,7 @@ pub struct GlobalContext {
     pub objs: AtomicU64,
     pub edges: AtomicU64,
     pub ne_edges: AtomicU64,
+    pub copied_objects: AtomicU64,
     pub cap: AtomicUsize,
 }
 
@@ -31,6 +33,7 @@ impl GlobalContext {
             objs: AtomicU64::new(0),
             edges: AtomicU64::new(0),
             ne_edges: AtomicU64::new(0),
+            copied_objects: AtomicU64::new(0),
             cap: AtomicUsize::new(1024),
         }
     }
@@ -51,6 +54,17 @@ impl GlobalContext {
         self.objs.store(0, Ordering::SeqCst);
         self.edges.store(0, Ordering::SeqCst);
         self.ne_edges.store(0, Ordering::SeqCst);
+        self.copied_objects.store(0, Ordering::SeqCst);
+    }
+
+    pub fn get_stats(&self) -> TracingStats {
+        TracingStats {
+            marked_objects: self.objs.load(Ordering::SeqCst),
+            slots: self.edges.load(Ordering::SeqCst),
+            non_empty_slots: self.ne_edges.load(Ordering::SeqCst),
+            copied_objects: self.copied_objects.load(Ordering::SeqCst),
+            ..Default::default()
+        }
     }
 }
 
@@ -64,6 +78,7 @@ pub struct WPWorker {
     pub objs: u64,
     pub slots: u64,
     pub ne_slots: u64,
+    pub copied_objects: u64,
     pub copy: LocalAllocator,
 }
 
@@ -79,6 +94,7 @@ impl crate::util::workers::Worker for WPWorker {
             objs: 0,
             slots: 0,
             ne_slots: 0,
+            copied_objects: 0,
             copy: LocalAllocator::new(),
         }
     }
@@ -92,6 +108,7 @@ impl crate::util::workers::Worker for WPWorker {
         self.objs = 0;
         self.slots = 0;
         self.ne_slots = 0;
+        self.copied_objects = 0;
         let group = self.group.upgrade().unwrap();
         // trace objects
         'outer: loop {
@@ -121,5 +138,8 @@ impl crate::util::workers::Worker for WPWorker {
         global.objs.fetch_add(self.objs, Ordering::SeqCst);
         global.edges.fetch_add(self.slots, Ordering::SeqCst);
         global.ne_edges.fetch_add(self.ne_slots, Ordering::SeqCst);
+        global
+            .copied_objects
+            .fetch_add(self.copied_objects, Ordering::SeqCst);
     }
 }

@@ -32,7 +32,8 @@ pub struct TracingStats {
     pub slots: u64,
     pub non_empty_slots: u64,
     pub sends: u64,
-    shape_cache_stats: ShapeCacheStats,
+    pub copied_objects: u64,
+    pub(crate) shape_cache_stats: ShapeCacheStats,
 }
 
 impl TracingStats {

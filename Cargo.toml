@@ -55,37 +55,37 @@ atomic_free_farwarding = []
 [profile.release]
 # lto = true
 
-[[bench]]
-name = "fop"
-harness = false
+# [[bench]]
+# name = "fop"
+# harness = false
 
-[[bench]]
-name = "pmd"
-harness = false
+# [[bench]]
+# name = "pmd"
+# harness = false
 
-[[bench]]
-name = "tradesoap"
-harness = false
+# [[bench]]
+# name = "tradesoap"
+# harness = false
 
 [[bench]]
 name = "avrora"
 harness = false
 
-[[bench]]
-name = "biojava"
-harness = false
+# [[bench]]
+# name = "biojava"
+# harness = false
 
-[[bench]]
-name = "cassandra"
-harness = false
+# [[bench]]
+# name = "cassandra"
+# harness = false
 
-[[bench]]
-name = "eclipse"
-harness = false
+# [[bench]]
+# name = "eclipse"
+# harness = false
 
-[[bench]]
-name = "lusearch"
-harness = false
+# [[bench]]
+# name = "lusearch"
+# harness = false
 
 [package.metadata.harness.profiles.default.builds]
 edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
