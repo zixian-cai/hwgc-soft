@@ -16,7 +16,7 @@ use std::{
 static mut ROOTS: Option<*const [u64]> = None;
 
 const NUM_QUEUES: usize = if cfg!(feature = "no_space_dispatch") {
-    2
+    1
 } else {
     1
 };
@@ -68,8 +68,7 @@ impl<O: ObjectModel> TracePacket<O> {
                 local.ne_slots += 1;
                 return;
             }
-            let index = Self::get_queue_index(c);
-            let next_slots = &mut self.next_slots[index];
+            let next_slots = &mut self.next_slots[0];
             if next_slots.is_empty() {
                 next_slots.reserve(cap);
             }
@@ -151,12 +150,19 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
             local.ne_slots += slots[i].len() as u64;
         }
         if cfg!(feature = "no_space_dispatch") {
-            for slot in std::mem::take(&mut slots[0]) {
+            let slots = std::mem::take(&mut slots[0]);
+            for slot in &slots {
                 let o = slot.load().unwrap();
-                self.trace_forward_object(slot, o, local, mark_state, capacity);
+                if Self::get_queue_index(o) != 0 {
+                    continue;
+                }
+                self.trace_forward_object(*slot, o, local, mark_state, capacity);
             }
-            for slot in std::mem::take(&mut slots[1]) {
+            for slot in &slots {
                 let o = slot.load().unwrap();
+                if Self::get_queue_index(o) != 1 {
+                    continue;
+                }
                 self.trace_mark_object(o, local, mark_state, capacity);
             }
         } else {
@@ -200,8 +206,8 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
                 local.slots += 1;
                 continue;
             };
-            let index = TracePacket::<O>::get_queue_index(o);
-            let buf = &mut slots[index];
+            // let index = TracePacket::<O>::get_queue_index(o);
+            let buf = &mut slots[0];
             if buf.is_empty() {
                 buf.reserve(capacity);
             }
