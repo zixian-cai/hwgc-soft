@@ -36,7 +36,9 @@ impl<O: ObjectModel> TracePacket<O> {
     }
 
     fn scan_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
-        local.objs += 1;
+        if cfg!(feature = "detailed_stats") {
+            local.objs += 1;
+        }
         o.scan::<O, _>(|s| {
             let Some(c) = s.load() else { return };
             if c.is_marked(mark_state) {
@@ -107,11 +109,15 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
         let capacity = GLOBAL.cap();
         let mark_state = local.global.mark_state();
         for slot in std::mem::take(&mut self.slots) {
-            local.slots += 1;
+            if cfg!(feature = "detailed_stats") {
+                local.slots += 1;
+            }
             if let Some(o) = slot.load() {
                 self.trace_object(slot, o, local, mark_state, capacity);
             } else {
-                local.ne_slots += 1;
+                if cfg!(feature = "detailed_stats") {
+                    local.ne_slots += 1;
+                }
             }
         }
         self.flush(local);
@@ -143,7 +149,9 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
         for root in &roots[self.range.clone()] {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
             if slot.load().is_none() {
-                local.slots += 1;
+                if cfg!(feature = "detailed_stats") {
+                    local.slots += 1;
+                }
                 continue;
             }
             if buf.is_empty() {
