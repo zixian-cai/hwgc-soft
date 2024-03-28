@@ -109,7 +109,11 @@ impl crate::util::workers::Worker for WPWorker {
     fn new(id: usize, group: Weak<WorkerGroup<Self>>) -> Self {
         Self {
             _id: id,
-            queue: Worker::new_lifo(),
+            queue: if cfg!(feature = "fifo") {
+                Worker::new_fifo()
+            } else {
+                Worker::new_lifo()
+            },
             group,
             global: GLOBAL.clone(),
             objs: 0,

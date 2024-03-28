@@ -53,6 +53,7 @@ relaxed_mark = []
 forwarding = []
 no_space_dispatch = []
 atomic_free_farwarding = []
+fifo = []
 
 [profile.release]
 # lto = true
@@ -127,3 +128,7 @@ wp = { env = { TRACING_LOOP = "WPEdgeSlot" } }
 wp_async = { env = { TRACING_LOOP = "WPEdgeSlotAsync" } }
 # [package.metadata.harness.profiles.fwd.probes]
 # harness-probe-perf = { events = "PERF_COUNT_HW_CPU_CYCLES,PERF_COUNT_HW_INSTRUCTIONS,PERF_COUNT_HW_CACHE_L1D:MISS,PERF_COUNT_HW_CACHE_DTLB:MISS" }
+
+[package.metadata.harness.profiles.queue_order.builds]
+wp_lifo = { env = { TRACING_LOOP = "WPEdgeSlot" } }
+wp_fifo = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = ["fifo"] }
