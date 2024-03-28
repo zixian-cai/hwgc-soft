@@ -35,14 +35,12 @@ lru = "0.12"
 once_cell = "1.19.0"
 num_cpus = "1.16.0"
 smallvec = "1.13.2"
-harness-probe-perf = "0.0.3"
+harness-probe-perf = "0.0.5"
+harness = "0.0.6"
 
 [build-dependencies]
 prost-build = { version = "0.11" }
 built = { version = "0.7.1", features = ["git2"] }
-
-[dev-dependencies]
-harness = "0.0.5"
 
 [features]
 m5 = []
@@ -57,37 +55,37 @@ atomic_free_farwarding = []
 [profile.release]
 # lto = true
 
-# [[bench]]
-# name = "fop"
-# harness = false
+[[bench]]
+name = "fop"
+harness = false
 
-# [[bench]]
-# name = "pmd"
-# harness = false
+[[bench]]
+name = "pmd"
+harness = false
 
-# [[bench]]
-# name = "tradesoap"
-# harness = false
+[[bench]]
+name = "tradesoap"
+harness = false
 
 [[bench]]
 name = "avrora"
 harness = false
 
-# [[bench]]
-# name = "biojava"
-# harness = false
+[[bench]]
+name = "biojava"
+harness = false
 
-# [[bench]]
-# name = "cassandra"
-# harness = false
+[[bench]]
+name = "cassandra"
+harness = false
 
-# [[bench]]
-# name = "eclipse"
-# harness = false
+[[bench]]
+name = "eclipse"
+harness = false
 
-# [[bench]]
-# name = "lusearch"
-# harness = false
+[[bench]]
+name = "lusearch"
+harness = false
 
 [package.metadata.harness.profiles.default.builds]
 edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }

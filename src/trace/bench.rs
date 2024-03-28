@@ -4,6 +4,7 @@ use std::{
 };
 
 use clap::Parser;
+use harness::Bencher;
 
 use crate::{
     BidirectionalObjectModel, HeapDump, ObjectModel, ObjectModelChoice, OpenJDKObjectModel,
@@ -19,6 +20,7 @@ use super::verify_mark;
 
 pub trait BenchContext: Send + Sync {
     fn iter(&self) -> TracingStats;
+    fn finalize(&self, b: &Bencher, stats: TracingStats);
 }
 
 struct BenchContextImpl<O: ObjectModel> {
@@ -55,6 +57,20 @@ impl<O: ObjectModel> BenchContext for BenchContextImpl<O> {
             &self.heapdump,
         )
         .unwrap()
+    }
+
+    fn finalize(&self, b: &Bencher, stats: TracingStats) {
+        b.add_stat("marked_objects", stats.marked_objects as u64);
+        b.add_stat("slots", stats.slots as u64);
+        b.add_stat("non_empty_slots", stats.non_empty_slots as u64);
+        b.add_stat("copied_objects", stats.copied_objects as u64);
+        b.add_stat("packets", stats.packets as u64);
+        b.add_stat("total_run_time_us", stats.total_run_time_us as u64);
+        let walltime_us = b.get_walltime().unwrap().as_micros() as f32;
+        b.add_stat(
+            "utilization",
+            stats.total_run_time_us as f32 / (32f32 * walltime_us),
+        );
     }
 }
 

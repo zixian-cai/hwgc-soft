@@ -37,7 +37,10 @@ impl<O: ObjectModel> TracePacket<O> {
 
     fn flush(&mut self, local: &mut WPWorker) {
         if self.next_len > 0 {
-            assert_eq!(self.next_len, self.next_slots.iter().map(|s| s.len()).sum());
+            assert_eq!(
+                self.next_len,
+                self.next_slots.iter().map(|s| s.len()).sum::<usize>()
+            );
             let next_slots = std::mem::take(&mut self.next_slots);
             let next = TracePacket::<O>::new(next_slots);
             local.add(Box::new(next));
