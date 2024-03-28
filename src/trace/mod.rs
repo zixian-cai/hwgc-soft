@@ -21,6 +21,7 @@ pub enum TracingLoopChoice {
     ShapeCache,
     WPEdgeSlot,
     WPEdgeSlot2,
+    WPEdgeSlotAsync,
     WPEdgeSlotDual,
     ParEdgeSlot,
     ParEdgeSlot2,
@@ -81,6 +82,7 @@ mod sanity;
 mod shape_cache;
 mod wp_edge_slot;
 mod wp_edge_slot2;
+mod wp_edge_slot_async;
 mod wp_edge_slot_dual;
 
 use self::util::tracer::Tracer;
@@ -94,6 +96,7 @@ fn create_tracer<O: ObjectModel>(args: &TraceArgs) -> Option<Box<dyn Tracer<O>>>
         TracingLoopChoice::EdgeSlot => Some(edge_slot::create_tracer::<O>()),
         TracingLoopChoice::WPEdgeSlot => Some(wp_edge_slot::create_tracer::<O>(args)),
         TracingLoopChoice::WPEdgeSlot2 => Some(wp_edge_slot2::create_tracer::<O>(args)),
+        TracingLoopChoice::WPEdgeSlotAsync => Some(wp_edge_slot_async::create_tracer::<O>(args)),
         TracingLoopChoice::WPEdgeSlotDual => Some(wp_edge_slot_dual::create_tracer::<O>(args)),
         TracingLoopChoice::ParEdgeSlot => Some(par_edge_slot::create_tracer::<O>(args)),
         TracingLoopChoice::ParEdgeSlot2 => Some(par_edge_slot2::create_tracer::<O>(args)),

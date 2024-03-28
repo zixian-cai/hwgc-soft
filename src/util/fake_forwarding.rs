@@ -40,7 +40,7 @@ unsafe impl Send for LocalAllocator {}
 unsafe impl Sync for LocalAllocator {}
 
 impl LocalAllocator {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             cursor: 0 as _,
             limit: 0 as _,
