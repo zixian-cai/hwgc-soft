@@ -190,12 +190,7 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         }
         // Wake up workers
         self.group.run_epoch();
-        TracingStats {
-            marked_objects: GLOBAL.objs.load(Ordering::SeqCst),
-            slots: GLOBAL.edges.load(Ordering::SeqCst),
-            non_empty_slots: GLOBAL.ne_edges.load(Ordering::SeqCst),
-            ..Default::default()
-        }
+        GLOBAL.get_stats()
     }
 
     fn teardown(&self) {
