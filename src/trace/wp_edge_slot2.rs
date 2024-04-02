@@ -1,11 +1,9 @@
-use smallvec::SmallVec;
-
 use super::TracingStats;
 use crate::util::fake_forwarding::TO_SPACE;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::{Object, Slot};
 use crate::util::workers::WorkerGroup;
-use crate::util::wp::{Packet, WPWorker, GLOBAL};
+use crate::util::wp2::{Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
 use std::ops::Range;
 use std::{
@@ -15,75 +13,48 @@ use std::{
 
 static mut ROOTS: Option<*const [u64]> = None;
 
-const SMALL_VEC_SIZE: usize = 32;
-const NUM_QUEUES: usize = 2;
-
 struct TracePacket<O: ObjectModel> {
-    slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES],
-    next_slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES],
-    next_len: usize,
+    slots: Vec<Slot>,
+    next_slots: Vec<Slot>,
     _p: PhantomData<O>,
 }
 
 impl<O: ObjectModel> TracePacket<O> {
-    fn new(slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES]) -> Self {
+    fn new(slots: Vec<Slot>) -> Self {
         Self {
             slots,
-            next_slots: Default::default(),
-            next_len: 0,
+            next_slots: Vec::new(),
             _p: PhantomData,
         }
     }
 
     fn flush(&mut self, local: &mut WPWorker) {
-        if self.next_len > 0 {
-            assert_eq!(
-                self.next_len,
-                self.next_slots.iter().map(|s| s.len()).sum::<usize>()
-            );
-            let next_slots = std::mem::take(&mut self.next_slots);
-            let next = TracePacket::<O>::new(next_slots);
-            local.add(Box::new(next));
-            self.next_len = 0;
-        }
-    }
-
-    fn get_queue_index(o: Object) -> usize {
-        if cfg!(feature = "no_space_dispatch") {
-            debug_assert!(o.space_id() == 0x2 || o.space_id() == 0x6);
-            (o.space_id() != 0x2) as usize
-        } else {
-            0
+        if !self.next_slots.is_empty() {
+            let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots));
+            local.spawn(next);
         }
     }
 
     fn scan_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
-        local.objs += 1;
+        if cfg!(feature = "detailed_stats") {
+            local.objs += 1;
+        }
         o.scan::<O, _>(|s| {
-            let Some(c) = s.load() else {
-                local.slots += 1;
-                return;
-            };
+            let Some(c) = s.load() else { return };
             if c.is_marked(mark_state) {
-                local.slots += 1;
-                local.ne_slots += 1;
                 return;
             }
-            let index = Self::get_queue_index(c);
-            let next_slots = &mut self.next_slots[index];
-            if next_slots.len() >= SMALL_VEC_SIZE {
-                next_slots.reserve(cap - SMALL_VEC_SIZE);
+            if self.next_slots.is_empty() {
+                self.next_slots.reserve(cap);
             }
-            next_slots.push(s);
-            self.next_len += 1;
-            if self.next_len >= cap {
+            self.next_slots.push(s);
+            if self.next_slots.len() >= cap {
                 self.flush(local);
             }
         });
     }
 
     fn trace_mark_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
-        debug_assert!(o.space_id() == 0x6);
         let marked = if cfg!(feature = "relaxed_mark") {
             o.mark_relaxed(mark_state)
         } else {
@@ -102,41 +73,22 @@ impl<O: ObjectModel> TracePacket<O> {
         mark_state: u8,
         cap: usize,
     ) {
-        debug_assert!(o.space_id() == 0x2);
-        if cfg!(feature = "atomic_free_farwarding") {
-            if o.is_forwarded_or_being_forwarded(mark_state) {
-                slot.volatile_store(o);
-                return;
-            }
-            o.set_as_forwarded(mark_state);
-        } else {
-            let old_state = o.attempt_to_forward(mark_state);
-            if old_state.is_forwarded_or_being_forwarded() {
-                let fwd = o.spin_and_get_farwarded_object(mark_state);
-                slot.volatile_store(fwd);
-                return;
-            }
+        let old_state = o.attempt_to_forward(mark_state);
+        if old_state.is_forwarded_or_being_forwarded() {
+            let fwd = o.spin_and_get_farwarded_object(mark_state);
+            slot.volatile_store(fwd);
+            return;
         }
         // copy
         let _farwarded = local.copy.copy_object::<O>(o);
         slot.volatile_store(o);
         o.set_as_forwarded(mark_state);
-        local.copied_objects += 1;
-        // Add complexity: touch every byte
-        let size = o.size::<O>();
-        for i in 8..size {
-            unsafe {
-                let ptr = (o.raw() as *mut u8).add(i);
-                let v = std::ptr::read_volatile(ptr);
-                std::ptr::write_volatile(ptr, v);
-            }
-        }
         // scan
         o.mark_relaxed(mark_state);
         self.scan_object(o, local, mark_state, cap);
     }
 
-    fn trace_object_generic(
+    fn trace_object(
         &mut self,
         slot: Slot,
         o: Object,
@@ -153,29 +105,19 @@ impl<O: ObjectModel> TracePacket<O> {
 }
 
 impl<O: ObjectModel> Packet for TracePacket<O> {
-    fn run(&mut self, local: &mut WPWorker) {
-        local.packets += 1;
+    fn run(&mut self) {
+        let local = WPWorker::current();
         let capacity = GLOBAL.cap();
         let mark_state = local.global.mark_state();
-        let mut slots = std::mem::take(&mut self.slots);
-        for i in 0..NUM_QUEUES {
-            local.slots += slots[i].len() as u64;
-            local.ne_slots += slots[i].len() as u64;
-        }
-        if cfg!(feature = "no_space_dispatch") {
-            for slot in std::mem::take(&mut slots[0]) {
-                let o = slot.load().unwrap();
-                self.trace_forward_object(slot, o, local, mark_state, capacity);
+        for slot in std::mem::take(&mut self.slots) {
+            if cfg!(feature = "detailed_stats") {
+                local.slots += 1;
             }
-            for slot in std::mem::take(&mut slots[1]) {
-                let o = slot.load().unwrap();
-                self.trace_mark_object(o, local, mark_state, capacity);
-            }
-        } else {
-            for buf in slots {
-                for slot in buf {
-                    let o = slot.load().unwrap();
-                    self.trace_object_generic(slot, o, local, mark_state, capacity);
+            if let Some(o) = slot.load() {
+                self.trace_object(slot, o, local, mark_state, capacity);
+            } else {
+                if cfg!(feature = "detailed_stats") {
+                    local.ne_slots += 1;
                 }
             }
         }
@@ -198,36 +140,35 @@ impl<O: ObjectModel> ScanRoots<O> {
 }
 
 impl<O: ObjectModel> Packet for ScanRoots<O> {
-    fn run(&mut self, local: &mut WPWorker) {
+    fn run(&mut self) {
+        let local = WPWorker::current();
         let capacity = GLOBAL.cap();
-        let mut slots: [SmallVec<[Slot; SMALL_VEC_SIZE]>; NUM_QUEUES] = Default::default();
-        let mut count = 0;
+        let mut buf = vec![];
         let Some(roots) = (unsafe { ROOTS }) else {
             unreachable!()
         };
         let roots = unsafe { &*roots };
         for root in &roots[self.range.clone()] {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
-            let Some(o) = slot.load() else {
-                local.slots += 1;
+            if slot.load().is_none() {
+                if cfg!(feature = "detailed_stats") {
+                    local.slots += 1;
+                }
                 continue;
-            };
-            let index = TracePacket::<O>::get_queue_index(o);
-            let buf = &mut slots[index];
-            if buf.len() >= SMALL_VEC_SIZE {
-                buf.reserve(capacity - SMALL_VEC_SIZE);
+            }
+            if buf.is_empty() {
+                buf.reserve(capacity);
             }
             buf.push(slot);
-            count += 1;
-            if count >= capacity {
-                let packet = TracePacket::<O>::new(std::mem::take(&mut slots));
-                local.add(Box::new(packet));
-                count = 0;
+            if buf.len() >= capacity {
+                let packet = TracePacket::<O>::new(buf);
+                local.spawn(packet);
+                buf = vec![];
             }
         }
-        if count > 0 {
-            let packet = TracePacket::<O>::new(std::mem::take(&mut slots));
-            local.add(Box::new(packet));
+        if !buf.is_empty() {
+            let packet = TracePacket::<O>::new(buf);
+            local.spawn(packet);
         }
     }
 }
