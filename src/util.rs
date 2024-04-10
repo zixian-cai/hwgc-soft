@@ -3,7 +3,9 @@ pub mod tracer;
 pub mod typed_obj;
 pub mod workers;
 pub mod wp;
+#[macro_use]
 pub mod wp2;
+pub mod side_mark_table;
 
 use anyhow::Result;
 

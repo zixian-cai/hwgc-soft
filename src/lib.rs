@@ -1,5 +1,7 @@
 #![feature(thread_local)]
 #![feature(test)]
+#![feature(lazy_cell)]
+#![feature(duration_millis_float)]
 
 extern crate test;
 
@@ -8,6 +10,9 @@ extern crate lazy_static;
 
 #[macro_use]
 extern crate log;
+
+#[macro_use]
+mod util;
 
 mod analysis;
 mod cli;
@@ -18,7 +23,6 @@ mod heapdump;
 pub mod m5;
 mod object_model;
 mod trace;
-mod util;
 
 pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

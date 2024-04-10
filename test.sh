@@ -2,7 +2,7 @@
 
 export RUST_LOG=trace
 
-features=detailed_stats,forwarding
+features=detailed_stats
 object_model=OpenJDK
 release=--release
 

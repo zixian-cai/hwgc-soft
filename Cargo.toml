@@ -39,6 +39,7 @@ harness-probe-perf = "0.0.5"
 harness = "0.0.6"
 tokio = { version = "1.36.0", features = ["full"] }
 futures = "0.3.30"
+ctor = "=0.2.7"
 
 [build-dependencies]
 prost-build = { version = "0.11" }
