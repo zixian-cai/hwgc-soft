@@ -1,0 +1,8 @@
+# running runbms -p snap-forwarding ./results ./scripts/forwarding.yml
+
+includes:
+  - "./runbms-base.yml"
+
+configs:
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot"
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot2"

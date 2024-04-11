@@ -6,10 +6,10 @@ rm -rf ./builds
 
 mkdir -p ./builds
 
-cargo build --release
+cargo build --release --features slower_root_scanning
 
 cp target/release/hwgc_soft ./builds/all_in_one
 
-cargo build --release --features fifo
+# cargo build --release --features fifo
 
-cp target/release/hwgc_soft ./builds/all_in_one_fifo
+# cp target/release/hwgc_soft ./builds/all_in_one_fifo
