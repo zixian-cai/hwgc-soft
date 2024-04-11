@@ -55,6 +55,7 @@ forwarding = []
 no_space_dispatch = []
 atomic_free_farwarding = []
 fifo = []
+slower_root_scanning = []
 
 [profile.release]
 # lto = true

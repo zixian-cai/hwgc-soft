@@ -215,8 +215,10 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
         let roots = unsafe { &*roots };
         for root in &roots[self.range.clone()] {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
-            for _ in 0..4096 {
-                unsafe { asm!("nop") };
+            if cfg!(feature = "slower_root_scanning") {
+                for _ in 0..4096 {
+                    unsafe { asm!("nop") };
+                }
             }
             if slot.load().is_none() {
                 if cfg!(feature = "detailed_stats") {
