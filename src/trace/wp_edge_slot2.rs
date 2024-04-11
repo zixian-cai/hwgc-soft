@@ -9,7 +9,7 @@ use crate::{ObjectModel, TraceArgs};
 use std::arch::asm;
 use std::ops::Range;
 use std::ptr::addr_of_mut;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Once};
 use std::{
     marker::PhantomData,
     sync::{atomic::Ordering, Arc},
@@ -252,7 +252,10 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
     fn startup(&self) {
         info!("Use {} worker threads.", self.group.workers.len());
         self.group.spawn();
-        init_dep_zeroing_trace::<O>();
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            init_dep_zeroing_trace::<O>();
+        });
     }
 
     fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {

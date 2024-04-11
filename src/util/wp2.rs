@@ -283,7 +283,12 @@ impl WPWorker {
             // );
             // Check all successors, and open them if all predecessors are open
             for succ in &packet.get_bucket().successors {
-                assert!(!succ.is_open(), "Successor is already open: {}", succ.name);
+                assert!(
+                    !succ.is_open(),
+                    "Successor is already open: {}->{}",
+                    packet.get_bucket().name,
+                    succ.name
+                );
                 if succ.predecessors.iter().all(|b| b.is_open()) {
                     succ.open();
                 }
