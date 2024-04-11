@@ -154,6 +154,7 @@ pub struct GlobalContext {
     cvar: Condvar,
     temp_yield: Mutex<usize>,
     yielded: AtomicUsize,
+    pub total_busy_us: AtomicUsize,
 }
 
 impl GlobalContext {
@@ -174,6 +175,7 @@ impl GlobalContext {
             cvar: Condvar::new(),
             temp_yield: Mutex::new(0),
             yielded: AtomicUsize::new(0),
+            total_busy_us: AtomicUsize::new(0),
         }
     }
 
@@ -209,6 +211,7 @@ impl GlobalContext {
         }
         *self.monitor.0.lock().unwrap() = false;
         self.yielded.store(0, Ordering::SeqCst);
+        self.total_busy_us.store(0, Ordering::SeqCst);
     }
 
     pub fn get_stats(&self) -> TracingStats {
@@ -219,6 +222,7 @@ impl GlobalContext {
             copied_objects: self.copied_objects.load(Ordering::SeqCst),
             packets: self.packets.load(Ordering::SeqCst),
             total_run_time_us: self.total_run_time_us.load(Ordering::SeqCst),
+            total_busy_time_us: self.total_busy_us.load(Ordering::SeqCst) as _,
             ..Default::default()
         }
     }
@@ -325,8 +329,9 @@ impl crate::util::workers::Worker for WPWorker {
         let group = self.group.upgrade().unwrap();
         let t = std::time::Instant::now();
         // trace objects
-        'outer: loop {
-            loop {
+        loop {
+            let x = std::time::Instant::now();
+            'outer: loop {
                 let mut executed_packets = false;
                 // Drain local queue
                 while let Some(p) = self.queue.pop() {
@@ -359,6 +364,10 @@ impl crate::util::workers::Worker for WPWorker {
                 }
                 break;
             }
+            let elapsed = x.elapsed().as_micros();
+            self.global
+                .total_busy_us
+                .fetch_add(elapsed as usize, Ordering::Relaxed);
             // sleep
             let mut yielded = GLOBAL.temp_yield.lock().unwrap();
             *yielded += 1;

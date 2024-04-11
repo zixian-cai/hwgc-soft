@@ -36,6 +36,7 @@ pub struct TracingStats {
     pub copied_objects: u64,
     pub packets: u64,
     pub total_run_time_us: u64,
+    pub total_busy_time_us: u64,
     pub(crate) shape_cache_stats: ShapeCacheStats,
 }
 
@@ -46,6 +47,10 @@ impl TracingStats {
         self.non_empty_slots += other.non_empty_slots;
         self.sends += other.sends;
         self.shape_cache_stats.add(&other.shape_cache_stats);
+        self.copied_objects += other.copied_objects;
+        self.packets += other.packets;
+        self.total_run_time_us += other.total_run_time_us;
+        self.total_busy_time_us += other.total_busy_time_us;
     }
 }
 
@@ -274,18 +279,21 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
 
     println!("============================ Tabulate Statistics ============================");
     println!(
-        "pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends\t{}",
+        "pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends\t{}\ttotal_time_us\ttotal_busy_us\tutilization",
         total_stats.shape_cache_stats.get_stats_header()
     );
     println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         pauses,
         time,
         total_stats.marked_objects,
         total_stats.slots,
         total_stats.non_empty_slots,
         total_stats.sends,
-        total_stats.shape_cache_stats.get_stats_value()
+        total_stats.shape_cache_stats.get_stats_value(),
+        total_stats.total_run_time_us,
+        total_stats.total_busy_time_us,
+        total_stats.total_busy_time_us as f64 / total_stats.total_run_time_us as f64,
     );
     println!("-------------------------- End Tabulate Statistics --------------------------");
     Ok(())

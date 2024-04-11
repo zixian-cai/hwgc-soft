@@ -25,8 +25,6 @@ pub struct Buckets {
 pub struct Bucket {
     count: AtomicUsize,
     pub name: &'static str,
-    pub predecessors: Vec<&'static Bucket>,
-    pub successors: Vec<&'static Bucket>,
     is_open: AtomicBool,
     queue: crossbeam::queue::SegQueue<Box<dyn Packet>>,
 }
@@ -36,8 +34,6 @@ impl Bucket {
         Self {
             name,
             count: AtomicUsize::new(0),
-            predecessors: Vec::new(),
-            successors: Vec::new(),
             is_open: AtomicBool::new(false),
             queue: crossbeam::queue::SegQueue::new(),
         }
@@ -85,6 +81,7 @@ pub struct GlobalContext {
     temp_yield: Mutex<usize>,
     yielded: AtomicUsize,
     pub buckets: Buckets,
+    pub total_busy_us: AtomicUsize,
 }
 
 impl GlobalContext {
@@ -109,6 +106,7 @@ impl GlobalContext {
                 prepare: Bucket::new("prepare"),
                 closure: Bucket::new("closure"),
             },
+            total_busy_us: AtomicUsize::new(0),
         }
     }
 
@@ -146,9 +144,14 @@ impl GlobalContext {
         self.yielded.store(0, Ordering::SeqCst);
         self.buckets.prepare.close();
         self.buckets.closure.close();
+        self.total_busy_us.store(0, Ordering::SeqCst);
     }
 
     pub fn get_stats(&self) -> TracingStats {
+        println!(
+            "total_busy_us {}",
+            self.total_busy_us.load(Ordering::SeqCst)
+        );
         TracingStats {
             marked_objects: self.objs.load(Ordering::SeqCst),
             slots: self.edges.load(Ordering::SeqCst),
@@ -156,6 +159,7 @@ impl GlobalContext {
             copied_objects: self.copied_objects.load(Ordering::SeqCst),
             packets: self.packets.load(Ordering::SeqCst),
             total_run_time_us: self.total_run_time_us.load(Ordering::SeqCst),
+            total_busy_time_us: self.total_busy_us.load(Ordering::SeqCst) as _,
             ..Default::default()
         }
     }
@@ -246,8 +250,9 @@ impl crate::util::workers::Worker for WPWorker {
         let group = self.group.upgrade().unwrap();
         let t = std::time::Instant::now();
         // trace objects
-        'outer: loop {
-            loop {
+        loop {
+            let x = std::time::Instant::now();
+            'outer: loop {
                 let mut executed_packets = false;
                 // Drain local queue
                 while let Some(p) = self.queue.pop() {
@@ -280,6 +285,11 @@ impl crate::util::workers::Worker for WPWorker {
                 }
                 break;
             }
+            let elapsed = x.elapsed().as_micros();
+            self.global
+                .total_busy_us
+                .fetch_add(elapsed as usize, Ordering::Relaxed);
+
             // sleep
             let mut yielded = GLOBAL.temp_yield.lock().unwrap();
             *yielded += 1;
