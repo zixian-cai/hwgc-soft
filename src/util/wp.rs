@@ -2,7 +2,9 @@ use crate::trace::TracingStats;
 use crate::util::workers::WorkerGroup;
 use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use once_cell::sync::Lazy;
-use std::sync::atomic::{AtomicU8, AtomicUsize};
+use std::cell::UnsafeCell;
+use std::ptr;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -12,11 +14,62 @@ use std::sync::{Condvar, Mutex, Weak};
 use super::fake_forwarding::LocalAllocator;
 
 pub trait Packet: Send {
-    fn run(&mut self, local: &mut WPWorker);
+    fn run(&mut self);
+}
+
+pub struct Buckets {
+    pub prepare: Bucket,
+    pub closure: Bucket,
+}
+
+pub struct Bucket {
+    count: AtomicUsize,
+    pub name: &'static str,
+    pub predecessors: Vec<&'static Bucket>,
+    pub successors: Vec<&'static Bucket>,
+    is_open: AtomicBool,
+    queue: crossbeam::queue::SegQueue<Box<dyn Packet>>,
+}
+
+impl Bucket {
+    pub const fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            count: AtomicUsize::new(0),
+            predecessors: Vec::new(),
+            successors: Vec::new(),
+            is_open: AtomicBool::new(false),
+            queue: crossbeam::queue::SegQueue::new(),
+        }
+    }
+
+    pub fn open(&self) {
+        info!("[{:.3}ms] Opening bucket {}", GLOBAL.elapsed(), self.name);
+        self.is_open.store(true, Ordering::SeqCst);
+        while let Some(p) = self.queue.pop() {
+            GLOBAL.active_queue.push(p);
+        }
+        if GLOBAL.yielded.load(Ordering::SeqCst) > 0 {
+            GLOBAL.cvar.notify_all();
+        }
+    }
+
+    pub fn close(&self) {
+        self.is_open.store(false, Ordering::SeqCst);
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.is_open.load(Ordering::SeqCst)
+    }
+
+    pub fn push(&self, packet: Box<dyn Packet>) {
+        self.count.fetch_add(1, Ordering::SeqCst);
+        self.queue.push(packet);
+    }
 }
 
 pub struct GlobalContext {
-    pub queue: Injector<Box<dyn Packet>>,
+    pub active_queue: Injector<Box<dyn Packet>>,
     pub mark_state: AtomicU8,
     pub objs: AtomicU64,
     pub edges: AtomicU64,
@@ -27,12 +80,17 @@ pub struct GlobalContext {
     parked: AtomicUsize,
     monitor: (Mutex<bool>, Condvar),
     pub cap: AtomicUsize,
+    pub start_time: UnsafeCell<std::time::Instant>,
+    cvar: Condvar,
+    temp_yield: Mutex<usize>,
+    yielded: AtomicUsize,
+    pub buckets: Buckets,
 }
 
 impl GlobalContext {
     pub fn new() -> Self {
         Self {
-            queue: Injector::new(),
+            active_queue: Injector::new(),
             mark_state: AtomicU8::new(0),
             objs: AtomicU64::new(0),
             edges: AtomicU64::new(0),
@@ -43,6 +101,14 @@ impl GlobalContext {
             parked: AtomicUsize::new(0),
             monitor: (Mutex::new(false), Condvar::new()),
             cap: AtomicUsize::new(128),
+            start_time: UnsafeCell::new(std::time::Instant::now()),
+            cvar: Condvar::new(),
+            temp_yield: Mutex::new(0),
+            yielded: AtomicUsize::new(0),
+            buckets: Buckets {
+                prepare: Bucket::new("prepare"),
+                closure: Bucket::new("closure"),
+            },
         }
     }
 
@@ -58,7 +124,14 @@ impl GlobalContext {
         self.mark_state.load(Ordering::Relaxed)
     }
 
+    pub fn elapsed(&self) -> f32 {
+        let t = unsafe { &*self.start_time.get() };
+        t.elapsed().as_millis_f32()
+    }
+
     pub fn reset(&self) {
+        let mut yielded = GLOBAL.temp_yield.lock().unwrap();
+        *yielded = 0;
         self.objs.store(0, Ordering::SeqCst);
         self.edges.store(0, Ordering::SeqCst);
         self.ne_edges.store(0, Ordering::SeqCst);
@@ -66,7 +139,13 @@ impl GlobalContext {
         self.packets.store(0, Ordering::SeqCst);
         self.total_run_time_us.store(0, Ordering::SeqCst);
         self.parked.store(0, Ordering::SeqCst);
+        unsafe {
+            *self.start_time.get() = std::time::Instant::now();
+        }
         *self.monitor.0.lock().unwrap() = false;
+        self.yielded.store(0, Ordering::SeqCst);
+        self.buckets.prepare.close();
+        self.buckets.closure.close();
     }
 
     pub fn get_stats(&self) -> TracingStats {
@@ -82,7 +161,12 @@ impl GlobalContext {
     }
 }
 
+unsafe impl Sync for GlobalContext {}
+
 pub static GLOBAL: Lazy<Arc<GlobalContext>> = Lazy::new(|| Arc::new(GlobalContext::new()));
+
+#[thread_local]
+static mut LOCAL: *mut WPWorker = ptr::null_mut();
 
 pub struct WPWorker {
     _id: usize,
@@ -98,8 +182,30 @@ pub struct WPWorker {
 }
 
 impl WPWorker {
-    pub fn add(&self, packet: Box<dyn Packet>) {
-        self.queue.push(packet);
+    pub fn spawn<P: Packet + 'static>(&self, bucket: usize, packet: P) {
+        let bucket = if bucket == 0 {
+            &self.global.buckets.prepare
+        } else {
+            &self.global.buckets.closure
+        };
+        if bucket.is_open() {
+            // println!("spawn: Bucket is open {}", bucket.name);
+            bucket.count.fetch_add(1, Ordering::SeqCst);
+            self.queue.push(Box::new(packet));
+            if GLOBAL.yielded.load(Ordering::SeqCst) > 0 {
+                self.global.cvar.notify_one();
+            }
+        } else {
+            bucket.push(Box::new(packet));
+        }
+    }
+
+    pub fn current() -> &'static mut WPWorker {
+        unsafe { &mut *LOCAL }
+    }
+
+    fn run_packet(&self, mut packet: Box<dyn Packet>) {
+        packet.run();
     }
 }
 
@@ -130,6 +236,7 @@ impl crate::util::workers::Worker for WPWorker {
     }
 
     fn run_epoch(&mut self) {
+        unsafe { LOCAL = self as *mut Self };
         self.copy.reset();
         self.objs = 0;
         self.slots = 0;
@@ -140,38 +247,72 @@ impl crate::util::workers::Worker for WPWorker {
         let t = std::time::Instant::now();
         // trace objects
         'outer: loop {
-            let mut executed_packets = false;
-            // Drain local queue
-            while let Some(mut p) = self.queue.pop() {
-                executed_packets = true;
-                p.run(self);
-            }
-            // Steal from global queue
-            match self.global.queue.steal() {
-                Steal::Success(mut p) => {
+            loop {
+                let mut executed_packets = false;
+                // Drain local queue
+                while let Some(p) = self.queue.pop() {
                     executed_packets = true;
-                    p.run(self);
+                    self.run_packet(p);
                 }
-                Steal::Retry => continue 'outer,
-                _ => {}
-            }
-            // Steal from other workers
-            for stealer in &*group.workers {
-                match stealer.steal() {
-                    Steal::Success(mut p) => {
+                // Steal from global queue
+                match self.global.active_queue.steal() {
+                    Steal::Success(p) => {
                         executed_packets = true;
-                        p.run(self);
-                        break;
+                        self.run_packet(p);
                     }
                     Steal::Retry => continue 'outer,
                     _ => {}
                 }
+                // Steal from other workers
+                for stealer in &*group.workers {
+                    match stealer.steal() {
+                        Steal::Success(p) => {
+                            executed_packets = true;
+                            self.run_packet(p);
+                            break;
+                        }
+                        Steal::Retry => continue 'outer,
+                        _ => {}
+                    }
+                }
+                if executed_packets {
+                    continue 'outer;
+                }
+                break;
             }
-            if executed_packets {
-                continue 'outer;
+            // sleep
+            let mut yielded = GLOBAL.temp_yield.lock().unwrap();
+            *yielded += 1;
+            GLOBAL.yielded.fetch_add(1, Ordering::SeqCst);
+            // println!(
+            //     "[{:.3}ms] Worker #{} yield {}",
+            //     GLOBAL.elapsed(),
+            //     self._id,
+            //     *yielded
+            // );
+            if group.workers.len() == *yielded {
+                if self.global.buckets.closure.is_open() {
+                    self.global.cvar.notify_all();
+                    break;
+                } else {
+                    self.global.buckets.closure.open();
+                    self.global.cvar.notify_all();
+                    *yielded -= 1;
+                    GLOBAL.yielded.fetch_sub(1, Ordering::SeqCst);
+                    continue;
+                }
             }
-            break;
+            yielded = self.global.cvar.wait(yielded).unwrap();
+            // println!("[{:.3}ms] Worker #{} wake", GLOBAL.elapsed(), self._id);
+            if group.workers.len() == *yielded {
+                break;
+            }
+            *yielded -= 1;
+            GLOBAL.yielded.fetch_sub(1, Ordering::SeqCst);
         }
+
+        // println!("Worker #{} exit", self._id);
+        // println!("[{:.3}ms] Worker #{} exit", GLOBAL.elapsed(), self._id);
         let elapsed = t.elapsed();
         assert!(self.queue.is_empty());
         let global = &self.global;

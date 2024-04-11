@@ -3,7 +3,7 @@ use crate::util::workers::WorkerGroup;
 use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use once_cell::sync::Lazy;
 use std::cell::UnsafeCell;
-use std::ptr::{self};
+use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -12,6 +12,10 @@ use std::sync::{
 use std::sync::{Condvar, Mutex, Weak};
 
 use super::fake_forwarding::LocalAllocator;
+
+pub trait Packet: Send + GetBucketByPacketInstance {
+    fn run(&mut self);
+}
 
 pub fn spawn<P: Packet + GetBucket>(packet: P) {
     let bucket = P::get();
@@ -73,7 +77,7 @@ impl Bucket {
     }
 
     pub fn open(&self) {
-        println!("[{:.3}ms] Opening bucket {}", GLOBAL.elapsed(), self.name);
+        info!("[{:.3}ms] Opening bucket {}", GLOBAL.elapsed(), self.name);
         self.is_open.store(true, Ordering::SeqCst);
         while let Some(p) = self.queue.pop() {
             GLOBAL.active_queue.push(p);
@@ -128,10 +132,6 @@ impl<P: GetBucket> GetBucketByPacketInstance for P {
 //     }
 // }
 
-pub trait Packet: Send + GetBucketByPacketInstance {
-    fn run(&mut self);
-}
-
 // impl<F: FnMut() + Send> Packet for F {
 //     fn run(&mut self) {
 //         self();
@@ -140,7 +140,6 @@ pub trait Packet: Send + GetBucketByPacketInstance {
 
 pub struct GlobalContext {
     pub active_queue: Injector<Box<dyn Packet>>,
-    // next_buckets: SegQueue<&'static Bucket>,
     pub mark_state: AtomicU8,
     pub objs: AtomicU64,
     pub edges: AtomicU64,
@@ -161,7 +160,6 @@ impl GlobalContext {
     pub fn new() -> Self {
         Self {
             active_queue: Injector::new(),
-            // next_buckets: SegQueue::new(),
             mark_state: AtomicU8::new(0),
             objs: AtomicU64::new(0),
             edges: AtomicU64::new(0),
@@ -209,7 +207,6 @@ impl GlobalContext {
         unsafe {
             *self.start_time.get() = std::time::Instant::now();
         }
-        // println!("Reset");
         *self.monitor.0.lock().unwrap() = false;
         self.yielded.store(0, Ordering::SeqCst);
     }
@@ -275,11 +272,11 @@ impl WPWorker {
         packet.run();
         if 1 == packet.get_bucket().count.fetch_sub(1, Ordering::SeqCst) {
             // This bucket is empty
-            println!(
-                "[{:.3}ms] Bucket is empty {}",
-                GLOBAL.elapsed(),
-                packet.get_bucket().name
-            );
+            // println!(
+            //     "[{:.3}ms] Bucket is empty {}",
+            //     GLOBAL.elapsed(),
+            //     packet.get_bucket().name
+            // );
             // Check all successors, and open them if all predecessors are open
             for succ in &packet.get_bucket().successors {
                 assert!(!succ.is_open(), "Successor is already open: {}", succ.name);
@@ -366,18 +363,18 @@ impl crate::util::workers::Worker for WPWorker {
             let mut yielded = GLOBAL.temp_yield.lock().unwrap();
             *yielded += 1;
             GLOBAL.yielded.fetch_add(1, Ordering::SeqCst);
-            println!(
-                "[{:.3}ms] Worker #{} yield {}",
-                GLOBAL.elapsed(),
-                self._id,
-                *yielded
-            );
+            // println!(
+            //     "[{:.3}ms] Worker #{} yield {}",
+            //     GLOBAL.elapsed(),
+            //     self._id,
+            //     *yielded
+            // );
             if group.workers.len() == *yielded {
                 self.global.cvar.notify_all();
                 break;
             }
             yielded = self.global.cvar.wait(yielded).unwrap();
-            println!("[{:.3}ms] Worker #{} wake", GLOBAL.elapsed(), self._id);
+            // println!("[{:.3}ms] Worker #{} wake", GLOBAL.elapsed(), self._id);
             if group.workers.len() == *yielded {
                 break;
             }
@@ -386,7 +383,7 @@ impl crate::util::workers::Worker for WPWorker {
         }
 
         // println!("Worker #{} exit", self._id);
-        println!("[{:.3}ms] Worker #{} exit", GLOBAL.elapsed(), self._id);
+        // println!("[{:.3}ms] Worker #{} exit", GLOBAL.elapsed(), self._id);
         let elapsed = t.elapsed();
         assert!(self.queue.is_empty());
         let global = &self.global;

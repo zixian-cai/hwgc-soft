@@ -1,17 +1,32 @@
 use super::TracingStats;
 use crate::util::fake_forwarding::TO_SPACE;
+use crate::util::side_mark_table::SideMarkTable;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::{Object, Slot};
 use crate::util::workers::WorkerGroup;
 use crate::util::wp::{Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
+use std::arch::asm;
 use std::ops::Range;
+use std::sync::LazyLock;
 use std::{
     marker::PhantomData,
     sync::{atomic::Ordering, Arc},
 };
 
 static mut ROOTS: Option<*const [u64]> = None;
+
+static SIDE_MARK_TABLE_IX: LazyLock<SideMarkTable> = LazyLock::new(|| SideMarkTable::new(8 << 30));
+
+struct MarkTableZeroingPacket {
+    range: Range<usize>,
+}
+
+impl Packet for MarkTableZeroingPacket {
+    fn run(&mut self) {
+        SIDE_MARK_TABLE_IX.bulk_zero(self.range.clone());
+    }
+}
 
 struct TracePacket<O: ObjectModel> {
     slots: Vec<Slot>,
@@ -31,7 +46,7 @@ impl<O: ObjectModel> TracePacket<O> {
     fn flush(&mut self, local: &mut WPWorker) {
         if !self.next_slots.is_empty() {
             let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots));
-            local.add(Box::new(next));
+            local.spawn(1, next);
         }
     }
 
@@ -55,8 +70,9 @@ impl<O: ObjectModel> TracePacket<O> {
     }
 
     fn trace_mark_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
-        let marked = if cfg!(feature = "relaxed_mark") {
-            o.mark_relaxed(mark_state)
+        let marked = if o.space_id() == 0x2 {
+            o.mark_relaxed(mark_state);
+            SIDE_MARK_TABLE_IX.mark(o)
         } else {
             o.mark(mark_state)
         };
@@ -105,7 +121,8 @@ impl<O: ObjectModel> TracePacket<O> {
 }
 
 impl<O: ObjectModel> Packet for TracePacket<O> {
-    fn run(&mut self, local: &mut WPWorker) {
+    fn run(&mut self) {
+        let local = WPWorker::current();
         let capacity = GLOBAL.cap();
         let mark_state = local.global.mark_state();
         for slot in std::mem::take(&mut self.slots) {
@@ -139,7 +156,8 @@ impl<O: ObjectModel> ScanRoots<O> {
 }
 
 impl<O: ObjectModel> Packet for ScanRoots<O> {
-    fn run(&mut self, local: &mut WPWorker) {
+    fn run(&mut self) {
+        let local = WPWorker::current();
         let capacity = GLOBAL.cap();
         let mut buf = vec![];
         let Some(roots) = (unsafe { ROOTS }) else {
@@ -148,6 +166,11 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
         let roots = unsafe { &*roots };
         for root in &roots[self.range.clone()] {
             let slot = Slot::from_raw(root as *const u64 as *mut u64);
+            if cfg!(feature = "slower_root_scanning") {
+                for _ in 0..4096 {
+                    unsafe { asm!("nop") };
+                }
+            }
             if slot.load().is_none() {
                 if cfg!(feature = "detailed_stats") {
                     local.slots += 1;
@@ -160,13 +183,13 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
             buf.push(slot);
             if buf.len() >= capacity {
                 let packet = TracePacket::<O>::new(buf);
-                local.add(Box::new(packet));
+                local.spawn(1, packet);
                 buf = vec![];
             }
         }
         if !buf.is_empty() {
             let packet = TracePacket::<O>::new(buf);
-            local.add(Box::new(packet));
+            local.spawn(1, packet);
         }
     }
 }
@@ -186,6 +209,14 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         GLOBAL.reset();
         GLOBAL.mark_state.store(mark_sense, Ordering::SeqCst);
         TO_SPACE.reset();
+        // Create fake mark table zeroing packet
+        let entries = SIDE_MARK_TABLE_IX.entries();
+        let chunk_size = entries / self.group.workers.len();
+        for i in (0..entries).step_by(chunk_size) {
+            let range = i..(i + chunk_size).min(entries);
+            let packet = MarkTableZeroingPacket { range };
+            GLOBAL.buckets.prepare.push(Box::new(packet));
+        }
         // Create initial root scanning packets
         let roots = object_model.roots();
         let roots_len = roots.len();
@@ -194,8 +225,9 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         for id in 0..num_workers {
             let range = (roots_len * id) / num_workers..(roots_len * (id + 1)) / num_workers;
             let packet = ScanRoots::<O>::new(range);
-            GLOBAL.queue.push(Box::new(packet));
+            GLOBAL.buckets.prepare.push(Box::new(packet));
         }
+        GLOBAL.buckets.prepare.open();
         // Wake up workers
         self.group.run_epoch();
         GLOBAL.get_stats()
