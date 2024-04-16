@@ -1,5 +1,6 @@
 use crate::*;
 use clap::{Parser, Subcommand, ValueEnum};
+
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
 #[clap(rename_all = "verbatim")]
 pub enum ObjectModelChoice {
@@ -59,4 +60,31 @@ pub enum Commands {
     Trace(TraceArgs),
     Analyze(AnalysisArgs),
     Depth(DepthArgs),
+    Memdump(MemdumpArgs),
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct MemdumpArgs {
+    #[arg(short, long)]
+    pub(crate) workload: MemdumpWorkload,
+    #[arg(short, long)]
+    pub(crate) output: String,
+    #[arg(short, long, value_parser = num_parser)]
+    pub(crate) mem_start: usize,
+}
+
+static NUM_PARSER_ERR: &str = "Invalid number. Must be base-10, or start with 0x or 0b.";
+
+fn num_parser(s: &str) -> Result<usize, &'static str> {
+    match s.get(0..2) {
+        Some("0x") => usize::from_str_radix(&s[2..], 16).map_err(|_| NUM_PARSER_ERR),
+        Some("0b") => usize::from_str_radix(&s[2..], 2).map_err(|_| NUM_PARSER_ERR),
+        _ => s.parse::<usize>().map_err(|_| NUM_PARSER_ERR),
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all = "verbatim")]
+pub enum MemdumpWorkload {
+    LinkedList,
 }

@@ -94,7 +94,7 @@ fn transitive_closure<O: ObjectModel>(
     mark_sense: u8,
     object_model: &mut O,
     shape_cache: &mut ShapeLruCache<O>,
-    tracer: Option<&Box<dyn Tracer<O>>>,
+    tracer: Option<&dyn Tracer<O>>,
 ) -> TimedTracingStats {
     let start: Instant = Instant::now();
     let l = args.tracing_loop;
@@ -212,7 +212,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
                 mark_sense,
                 &mut object_model,
                 &mut shape_cache,
-                tracer.as_ref(),
+                tracer.as_deref(),
             );
             let millis = timed_stats.time.as_micros() as f64 / 1000f64;
             let stats = timed_stats.stats;

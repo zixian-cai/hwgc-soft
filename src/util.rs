@@ -4,6 +4,7 @@ pub mod workers;
 pub mod wp;
 
 use anyhow::Result;
+use libc::c_void;
 
 fn wrap_libc_call<T: PartialEq>(f: &dyn Fn() -> T, expect: T) -> Result<()> {
     let ret = f();
@@ -34,4 +35,22 @@ pub fn dzmmap_noreplace(start: u64, size: usize) -> Result<()> {
         libc::MAP_ANON | libc::MAP_PRIVATE | libc::MAP_FIXED_NOREPLACE | libc::MAP_NORESERVE;
 
     mmap_fixed(start, size, prot, flags)
+}
+
+pub fn mmap_anon(size: usize) -> Result<*mut c_void> {
+    let ret = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            size,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_ANON | libc::MAP_PRIVATE | libc::MAP_NORESERVE,
+            -1,
+            0,
+        )
+    };
+    if ret == libc::MAP_FAILED {
+        Err(std::io::Error::last_os_error().into())
+    } else {
+        Ok(ret)
+    }
 }
