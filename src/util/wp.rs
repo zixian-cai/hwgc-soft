@@ -19,13 +19,10 @@ pub struct GlobalContext {
     pub mark_state: AtomicU8,
     pub objs: AtomicU64,
     pub edges: AtomicU64,
-    parked: AtomicUsize,
-    monitor: (Mutex<bool>, Condvar),
     pub ne_edges: AtomicU64,
     pub cap: AtomicUsize,
-    cvar: Condvar,
-    temp_yield: Mutex<usize>,
-    yielded: AtomicUsize,
+    epoch_monitor: (Mutex<bool>, Condvar),
+    yield_monitor: (Mutex<usize>, Condvar, AtomicUsize),
 }
 
 impl GlobalContext {
@@ -37,11 +34,8 @@ impl GlobalContext {
             edges: AtomicU64::new(0),
             ne_edges: AtomicU64::new(0),
             cap: AtomicUsize::new(4096),
-            parked: AtomicUsize::new(0),
-            monitor: (Mutex::new(false), Condvar::new()),
-            cvar: Condvar::new(),
-            temp_yield: Mutex::new(0),
-            yielded: AtomicUsize::new(0),
+            epoch_monitor: (Mutex::new(false), Condvar::new()),
+            yield_monitor: (Mutex::new(0), Condvar::new(), AtomicUsize::new(0)),
         }
     }
 
@@ -58,14 +52,13 @@ impl GlobalContext {
     }
 
     pub fn reset(&self) {
-        let mut yielded = GLOBAL.temp_yield.lock().unwrap();
+        let mut yielded = GLOBAL.yield_monitor.0.lock().unwrap();
         *yielded = 0;
         self.objs.store(0, Ordering::SeqCst);
         self.edges.store(0, Ordering::SeqCst);
         self.ne_edges.store(0, Ordering::SeqCst);
-        self.parked.store(0, Ordering::SeqCst);
-        *self.monitor.0.lock().unwrap() = false;
-        self.yielded.store(0, Ordering::SeqCst);
+        *self.epoch_monitor.0.lock().unwrap() = false;
+        self.yield_monitor.2.store(0, Ordering::SeqCst);
     }
 
     pub fn get_stats(&self) -> TracingStats {
@@ -97,8 +90,8 @@ pub struct WPWorker {
 impl WPWorker {
     pub fn spawn<P: Packet + 'static>(&self, packet: P) {
         self.queue.push(Box::new(packet));
-        if GLOBAL.yielded.load(Ordering::SeqCst) > 0 {
-            self.global.cvar.notify_one();
+        if GLOBAL.yield_monitor.2.load(Ordering::SeqCst) > 0 {
+            self.global.yield_monitor.1.notify_one();
         }
     }
 
@@ -172,21 +165,21 @@ impl crate::util::workers::Worker for WPWorker {
                 }
             }
             // sleep
-            let mut yielded = GLOBAL.temp_yield.lock().unwrap();
+            let mut yielded = GLOBAL.yield_monitor.0.lock().unwrap();
             *yielded += 1;
-            GLOBAL.yielded.fetch_add(1, Ordering::SeqCst);
+            GLOBAL.yield_monitor.2.fetch_add(1, Ordering::SeqCst);
             if group.workers.len() == *yielded {
                 // notify all workers we are done
-                self.global.cvar.notify_all();
+                self.global.yield_monitor.1.notify_all();
                 break;
             }
-            yielded = self.global.cvar.wait(yielded).unwrap();
+            yielded = self.global.yield_monitor.1.wait(yielded).unwrap();
             if group.workers.len() == *yielded {
                 // finish the current epoch
                 break;
             }
             *yielded -= 1;
-            GLOBAL.yielded.fetch_sub(1, Ordering::SeqCst);
+            GLOBAL.yield_monitor.2.fetch_sub(1, Ordering::SeqCst);
         }
         assert!(self.queue.is_empty());
         let global = &self.global;
