@@ -1,15 +1,17 @@
+use crate::trace::TracingStats;
 use crate::util::workers::WorkerGroup;
 use crossbeam::deque::{Injector, Steal, Stealer, Worker};
 use once_cell::sync::Lazy;
+use std::cell::Cell;
 use std::sync::atomic::{AtomicU8, AtomicUsize};
-use std::sync::Weak;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
+use std::sync::{Condvar, Mutex, Weak};
 
 pub trait Packet: Send {
-    fn run(&mut self, local: &mut WPWorker);
+    fn run(&mut self);
 }
 
 pub struct GlobalContext {
@@ -17,8 +19,13 @@ pub struct GlobalContext {
     pub mark_state: AtomicU8,
     pub objs: AtomicU64,
     pub edges: AtomicU64,
+    parked: AtomicUsize,
+    monitor: (Mutex<bool>, Condvar),
     pub ne_edges: AtomicU64,
     pub cap: AtomicUsize,
+    cvar: Condvar,
+    temp_yield: Mutex<usize>,
+    yielded: AtomicUsize,
 }
 
 impl GlobalContext {
@@ -30,6 +37,11 @@ impl GlobalContext {
             edges: AtomicU64::new(0),
             ne_edges: AtomicU64::new(0),
             cap: AtomicUsize::new(4096),
+            parked: AtomicUsize::new(0),
+            monitor: (Mutex::new(false), Condvar::new()),
+            cvar: Condvar::new(),
+            temp_yield: Mutex::new(0),
+            yielded: AtomicUsize::new(0),
         }
     }
 
@@ -46,22 +58,57 @@ impl GlobalContext {
     }
 
     pub fn reset(&self) {
+        let mut yielded = GLOBAL.temp_yield.lock().unwrap();
+        *yielded = 0;
         self.objs.store(0, Ordering::SeqCst);
         self.edges.store(0, Ordering::SeqCst);
         self.ne_edges.store(0, Ordering::SeqCst);
+        self.parked.store(0, Ordering::SeqCst);
+        *self.monitor.0.lock().unwrap() = false;
+        self.yielded.store(0, Ordering::SeqCst);
+    }
+
+    pub fn get_stats(&self) -> TracingStats {
+        TracingStats {
+            marked_objects: self.objs.load(Ordering::SeqCst),
+            slots: self.edges.load(Ordering::SeqCst),
+            non_empty_slots: self.ne_edges.load(Ordering::SeqCst),
+            ..Default::default()
+        }
     }
 }
 
 pub static GLOBAL: Lazy<Arc<GlobalContext>> = Lazy::new(|| Arc::new(GlobalContext::new()));
 
+thread_local! {
+    static LOCAL: Cell<*mut WPWorker> = Cell::new(std::ptr::null_mut());
+}
+
 pub struct WPWorker {
     _id: usize,
-    pub queue: Worker<Box<dyn Packet>>,
+    queue: Worker<Box<dyn Packet>>,
     pub global: Arc<GlobalContext>,
     pub group: Weak<WorkerGroup<WPWorker>>,
     pub objs: u64,
     pub slots: u64,
     pub ne_slots: u64,
+}
+
+impl WPWorker {
+    pub fn spawn<P: Packet + 'static>(&self, packet: P) {
+        self.queue.push(Box::new(packet));
+        if GLOBAL.yielded.load(Ordering::SeqCst) > 0 {
+            self.global.cvar.notify_one();
+        }
+    }
+
+    pub fn current() -> &'static mut WPWorker {
+        unsafe { &mut *LOCAL.get() }
+    }
+
+    fn run_packet(&self, mut packet: Box<dyn Packet>) {
+        packet.run();
+    }
 }
 
 impl crate::util::workers::Worker for WPWorker {
@@ -84,32 +131,62 @@ impl crate::util::workers::Worker for WPWorker {
     }
 
     fn run_epoch(&mut self) {
+        LOCAL.set(self as *mut Self);
         self.objs = 0;
         self.slots = 0;
         self.ne_slots = 0;
         let group = self.group.upgrade().unwrap();
         // trace objects
-        'outer: loop {
-            // Drain local queue
-            while let Some(mut p) = self.queue.pop() {
-                p.run(self);
-            }
-            // Steal from global queue
-            while let Steal::Success(mut p) = self.global.queue.steal() {
-                p.run(self);
-            }
-            // Steal from other workers
-            for stealer in &*group.workers {
-                match stealer.steal() {
-                    Steal::Success(mut p) => {
-                        p.run(self);
-                        continue 'outer;
+        loop {
+            'poll: loop {
+                let mut executed_packets = false;
+                // Drain local queue
+                while let Some(p) = self.queue.pop() {
+                    executed_packets = true;
+                    self.run_packet(p);
+                }
+                // Steal from global queue
+                match self.global.queue.steal() {
+                    Steal::Success(p) => {
+                        executed_packets = true;
+                        self.run_packet(p);
                     }
-                    Steal::Retry => continue 'outer,
+                    Steal::Retry => continue 'poll,
                     _ => {}
                 }
+                // Steal from other workers
+                for stealer in &*group.workers {
+                    match stealer.steal() {
+                        Steal::Success(p) => {
+                            executed_packets = true;
+                            self.run_packet(p);
+                            break;
+                        }
+                        Steal::Retry => continue 'poll,
+                        _ => {}
+                    }
+                }
+                // If there was no packet to execute, break
+                if !executed_packets {
+                    break;
+                }
             }
-            break;
+            // sleep
+            let mut yielded = GLOBAL.temp_yield.lock().unwrap();
+            *yielded += 1;
+            GLOBAL.yielded.fetch_add(1, Ordering::SeqCst);
+            if group.workers.len() == *yielded {
+                // notify all workers we are done
+                self.global.cvar.notify_all();
+                break;
+            }
+            yielded = self.global.cvar.wait(yielded).unwrap();
+            if group.workers.len() == *yielded {
+                // finish the current epoch
+                break;
+            }
+            *yielded -= 1;
+            GLOBAL.yielded.fetch_sub(1, Ordering::SeqCst);
         }
         assert!(self.queue.is_empty());
         let global = &self.global;

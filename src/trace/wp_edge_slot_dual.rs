@@ -1,5 +1,3 @@
-use crossbeam::deque::Worker;
-
 use super::TracingStats;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::{Object, Slot};
@@ -29,18 +27,18 @@ impl<O: ObjectModel> TracePacket<O> {
         }
     }
 
-    fn flush(&mut self, local: &mut WPWorker) {
+    fn flush(&mut self) {
         if !self.next_objects.is_empty() {
             let mut next = ScanPacket::<O>::new(std::mem::take(&mut self.next_objects));
-            // local.push(Box::new(next));
-            next.run(local);
+            next.run();
         }
     }
 }
 
 impl<O: ObjectModel> Packet for TracePacket<O> {
-    fn run(&mut self, local: &mut WPWorker) {
+    fn run(&mut self) {
         let capacity = GLOBAL.cap();
+        let local = WPWorker::current();
         let mark_state = local.global.mark_state();
         for slot in std::mem::take(&mut self.slots) {
             local.slots += 1;
@@ -52,13 +50,13 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
                     }
                     self.next_objects.push(o);
                     if self.next_objects.len() >= capacity {
-                        self.flush(local);
+                        self.flush();
                     }
                 } else {
                     local.ne_slots += 1;
                 }
             }
-            self.flush(local);
+            self.flush();
         }
     }
 }
@@ -78,16 +76,17 @@ impl<O: ObjectModel> ScanPacket<O> {
         }
     }
 
-    fn flush(&mut self, local: &Worker<Box<dyn Packet>>) {
+    fn flush(&mut self, local: &WPWorker) {
         if !self.next_slots.is_empty() {
             let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots));
-            local.push(Box::new(next));
+            local.spawn(next);
         }
     }
 }
 
 impl<O: ObjectModel> Packet for ScanPacket<O> {
-    fn run(&mut self, local: &mut WPWorker) {
+    fn run(&mut self) {
+        let local = WPWorker::current();
         let capacity = GLOBAL.cap();
         for o in std::mem::take(&mut self.objects) {
             o.scan::<O, _>(|s| {
@@ -96,11 +95,11 @@ impl<O: ObjectModel> Packet for ScanPacket<O> {
                 }
                 self.next_slots.push(s);
                 if self.next_slots.len() >= capacity {
-                    self.flush(&local.queue);
+                    self.flush(&local);
                 }
             });
         }
-        self.flush(&local.queue);
+        self.flush(local);
     }
 }
 
@@ -119,8 +118,9 @@ impl<O: ObjectModel> ScanRoots<O> {
 }
 
 impl<O: ObjectModel> Packet for ScanRoots<O> {
-    fn run(&mut self, local: &mut WPWorker) {
+    fn run(&mut self) {
         let capacity = GLOBAL.cap();
+        let local = WPWorker::current();
         let mut buf = vec![];
         let Some(roots) = (unsafe { ROOTS }) else {
             unreachable!()
@@ -133,14 +133,12 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
             }
             buf.push(slot);
             if buf.len() >= capacity {
-                let packet = TracePacket::<O>::new(buf);
-                local.queue.push(Box::new(packet));
+                local.spawn(TracePacket::<O>::new(buf));
                 buf = vec![];
             }
         }
         if !buf.is_empty() {
-            let packet = TracePacket::<O>::new(buf);
-            local.queue.push(Box::new(packet));
+            local.spawn(TracePacket::<O>::new(buf));
         }
     }
 }
@@ -171,12 +169,7 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotDualTracer<O> {
         }
         // Wake up workers
         self.group.run_epoch();
-        TracingStats {
-            marked_objects: GLOBAL.objs.load(Ordering::SeqCst),
-            slots: GLOBAL.edges.load(Ordering::SeqCst),
-            non_empty_slots: GLOBAL.ne_edges.load(Ordering::SeqCst),
-            ..Default::default()
-        }
+        GLOBAL.get_stats()
     }
 
     fn teardown(&self) {
