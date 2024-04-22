@@ -95,7 +95,7 @@ impl<O: ObjectModel> Packet for ScanPacket<O> {
                 }
                 self.next_slots.push(s);
                 if self.next_slots.len() >= capacity {
-                    self.flush(&local);
+                    self.flush(local);
                 }
             });
         }

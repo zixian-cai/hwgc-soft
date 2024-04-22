@@ -74,7 +74,7 @@ impl GlobalContext {
 pub static GLOBAL: Lazy<Arc<GlobalContext>> = Lazy::new(|| Arc::new(GlobalContext::new()));
 
 thread_local! {
-    static LOCAL: Cell<*mut WPWorker> = Cell::new(std::ptr::null_mut());
+    static LOCAL: Cell<*mut WPWorker> = const { Cell::new(std::ptr::null_mut()) };
 }
 
 pub struct WPWorker {
