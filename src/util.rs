@@ -54,3 +54,11 @@ pub fn mmap_anon(size: usize) -> Result<*mut c_void> {
         Ok(ret)
     }
 }
+
+pub const fn align_up(val: usize, align: usize) -> usize {
+    val.wrapping_add(align).wrapping_sub(1) & !align.wrapping_sub(1)
+}
+
+// pub const fn align_down(val: usize, align: usize) -> usize {
+//     val & !align.wrapping_sub(1)
+// }

@@ -70,7 +70,7 @@ pub struct MemdumpArgs {
     #[arg(short, long)]
     pub(crate) output: String,
     #[arg(short, long, value_parser = num_parser)]
-    pub(crate) mem_start: usize,
+    pub(crate) mem_base: usize,
 }
 
 static NUM_PARSER_ERR: &str = "Invalid number. Must be base-10, or start with 0x or 0b.";
