@@ -3,6 +3,7 @@ extern crate log;
 use anyhow::Result;
 
 use clap::Parser;
+use hwgc_soft::NoOpMemoryInterface;
 use hwgc_soft::*;
 use std::time::Instant;
 
@@ -10,7 +11,10 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
     for path in &args.paths {
         let start = Instant::now();
         let heapdump = HeapDump::from_binpb_zst(path)?;
-        let tibs_cached = object_model.restore_tibs(&heapdump);
+        // TODO: Should use target memory address when restoring tib
+        // for memdump
+        let tibs_cached = object_model
+            .restore_tibs::<NoOpMemoryInterface>(&heapdump, &NoOpMemoryInterface::new());
         let elapsed = start.elapsed();
         info!(
             "{} extra TIBs cached from processing {} in {} ms",

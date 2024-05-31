@@ -173,7 +173,8 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         // write objects to the heap
         {
             let start = Instant::now();
-            object_model.restore_objects(&heapdump);
+            object_model
+                .restore_objects::<NoOpMemoryInterface>(&heapdump, &NoOpMemoryInterface::new());
             let elapsed = start.elapsed();
             info!(
                 "Finish deserializing the heapdump, {} objects in {} ms",

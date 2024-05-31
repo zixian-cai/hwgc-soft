@@ -1,3 +1,4 @@
+use crate::memif::MemoryInterface;
 use std::collections::HashMap;
 
 use crate::HeapDump;
@@ -30,8 +31,12 @@ pub trait ObjectModel: Send + 'static {
     ///
     /// Note that InstanceMirrorKlass (i.e., those objects whose
     /// instance_mirror_start is some) is never cached.
-    fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize;
-    fn restore_objects(&mut self, heapdump: &HeapDump);
+    fn restore_tibs<M>(&mut self, heapdump: &HeapDump, memif: &M) -> usize
+    where
+        M: MemoryInterface;
+    fn restore_objects<M>(&mut self, heapdump: &HeapDump, memif: &M)
+    where
+        M: MemoryInterface;
     fn scan_object<F>(o: u64, callback: F)
     where
         F: FnMut(*mut u64, u64);

@@ -14,9 +14,9 @@ impl LinkedList {
 impl MemdumpWorkload for LinkedList {
     unsafe fn gen_memdump(&self, md: &mut super::Memdump) {
         info!("Synthesized memdump of a linked list");
-        let word_size = 8 as usize;
+        let word_size = 8_usize;
         // 1 root slot plus 1 word for the number of root slots
-        let roots_size = word_size * 1 + 1;
+        let roots_size = word_size + 1;
         let segment_roots = md.alloc_segment(roots_size);
         let num_root_ptr = segment_roots.start as *mut usize;
         info!(

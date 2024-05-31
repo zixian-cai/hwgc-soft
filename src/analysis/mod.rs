@@ -94,7 +94,7 @@ pub fn reified_analysis<O: ObjectModel>(mut object_model: O, args: Args) -> Resu
         // mmap
         heapdump.map_spaces()?;
         // write objects to the heap
-        object_model.restore_objects(&heapdump);
+        object_model.restore_objects::<NoOpMemoryInterface>(&heapdump, &NoOpMemoryInterface::new());
         analysis.run(&object_model);
         let duration = start.elapsed();
         println!(

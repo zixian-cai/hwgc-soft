@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::{HeapDump, HeapObject, ObjectModel};
+use crate::{HeapDump, HeapObject, MemoryInterface, ObjectModel};
 use fixedbitset::FixedBitSet;
 use std::alloc::{self, Layout};
 use std::collections::HashMap;
@@ -389,7 +389,10 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
         self.object_sizes.clear();
     }
 
-    fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize {
+    fn restore_tibs<M>(&mut self, heapdump: &HeapDump, memif: &M) -> usize
+    where
+        M: MemoryInterface,
+    {
         let before_size = TIBS.lock().unwrap().len();
         for object in &heapdump.objects {
             let is_objarray = object.objarray_length.is_some();
@@ -403,7 +406,10 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
         after_size - before_size
     }
 
-    fn restore_objects(&mut self, heapdump: &HeapDump) {
+    fn restore_objects<M>(&mut self, heapdump: &HeapDump, memif: &M)
+    where
+        M: MemoryInterface,
+    {
         for object in &heapdump.objects {
             OBJECT_MAPS
                 .lock()
