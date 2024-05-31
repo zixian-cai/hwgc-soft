@@ -14,8 +14,22 @@ pub trait HasTibType {
     fn get_tib_type(&self) -> TibType;
 }
 
+/// A heap graph view over raw memory
+///
+/// Stores both objects and metadata (tib)
+///
+/// Note that an instance of ObjectModel should only be used on heapdumps
+/// from the same benchmark invocation, where objects with the same Klass/type
+/// id indeed have the same type.
 pub trait ObjectModel: Send + 'static {
     type Tib: HasTibType;
+    /// Restore TIBs for classes found in the heapdump
+    ///
+    /// Cache these TIBs across multiple calls, so already-known types
+    /// don't need to have TIBs allocated multiple times.
+    ///
+    /// Note that InstanceMirrorKlass (i.e., those objects whose
+    /// instance_mirror_start is some) is never cached.
     fn restore_tibs(&mut self, heapdump: &HeapDump) -> usize;
     fn restore_objects(&mut self, heapdump: &HeapDump);
     fn scan_object<F>(o: u64, callback: F)
