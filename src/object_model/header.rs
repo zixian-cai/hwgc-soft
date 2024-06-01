@@ -1,3 +1,4 @@
+use crate::memif::MemoryInterface;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 #[repr(transparent)]
@@ -14,6 +15,13 @@ impl Header {
 
     pub fn store(self, o: u64) {
         unsafe { *(o as *mut u64) = self.0 };
+    }
+
+    pub fn store_via_memif<M>(self, o: u64, memif: &M)
+    where
+        M: MemoryInterface,
+    {
+        unsafe { memif.write_value_to_target(o as *mut u64, self.0) };
     }
 
     pub fn get_mark_byte(&self) -> u8 {

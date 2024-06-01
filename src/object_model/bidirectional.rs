@@ -258,14 +258,14 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
             let new_start = *self.forwarding.get(&object.start).unwrap();
             unsafe {
                 if HEADER {
-                    header.store(new_start);
+                    header.store_via_memif(new_start, memif);
                 }
-                std::ptr::write::<u64>((new_start + 8) as *mut u64, tib_ptr as u64);
+                memif.write_pointer_to_target((new_start + 8) as *mut *const Tib, tib_ptr);
             }
             // Write out array length for obj array
             if let Some(l) = object.objarray_length {
                 unsafe {
-                    std::ptr::write::<u64>((new_start + 16) as *mut u64, l);
+                    memif.write_value_to_target((new_start + 16) as *mut u64, l);
                 }
             }
             // Write out each non-zero ref field
@@ -281,7 +281,10 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
                     } else {
                         *self.forwarding.get(&e.objref).unwrap()
                     };
-                    std::ptr::write::<u64>(ref_cursor as *mut u64, new_referent);
+                    memif.write_pointer_to_target(
+                        ref_cursor as *mut *const u64,
+                        new_referent as *const u64,
+                    );
                     ref_cursor += 8;
                 }
             }
