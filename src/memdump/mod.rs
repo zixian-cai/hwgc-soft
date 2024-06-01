@@ -4,6 +4,7 @@ use crate::MemoryInterface;
 use crate::*;
 use anyhow::Result;
 
+mod heap_dump;
 mod linked_list;
 
 /// Memory dump for making heapdumps usable on devices with physical memory only
@@ -33,7 +34,12 @@ struct MemdumpMapping {
 
 impl MemdumpMapping {
     fn to_arena(&self, align: usize) -> BumpAllocationArena {
-        BumpAllocationArena::new(self.backing_memory_start, self.size, align)
+        BumpAllocationArena::new(
+            self.backing_memory_start,
+            self.host_memory_start,
+            self.size,
+            align,
+        )
     }
 }
 
@@ -84,11 +90,15 @@ impl MemoryInterface for MemdumpMemoryInterface {
     unsafe fn write_pointer_to_target<T>(&self, dst_host: *mut *const T, src_host: *const T) {
         let dst_backing = self.translate_to_backing(dst_host);
         let src_target = self.translate_to_target(src_host);
+        // dbg!(dst_host, src_host);
+        // dbg!(dst_backing, src_target);
         std::ptr::write(dst_backing as *mut *const T, src_target as *const T);
     }
 
-    unsafe fn write_value_to_target<T>(&self, dst_host: *mut T, src: T) {
+    unsafe fn write_value_to_target<T: std::fmt::Debug>(&self, dst_host: *mut T, src: T) {
         let dst_backing = self.translate_to_backing(dst_host);
+        // dbg!(dst_host, &src);
+        // dbg!(dst_backing);
         std::ptr::write(dst_backing as *mut T, src);
     }
 }
@@ -121,6 +131,7 @@ impl Memdump {
             host_memory_start,
             size,
         };
+        info!("Memdump new mapping: {:?}", ret);
         self.mappings.push(ret);
         ret
     }
@@ -133,13 +144,13 @@ impl Memdump {
 }
 
 trait MemdumpWorkload {
-    unsafe fn gen_memdump(&self, md: &mut Memdump);
+    unsafe fn gen_memdump<O: ObjectModel>(&self, object_model: O, args: Args, md: &mut Memdump);
 }
 
 // Such as PATH=$HOME/protoc/bin:$PATH cargo run --release -- ../heapdumps/sampled/luindex/* -o OpenJDK memdump --workload LinkedList --output ./1.bin --mem-start 0xc0000000
-pub fn dump_mem<O: ObjectModel>(_object_model: O, args: Args) -> Result<()> {
-    let memdump_args = if let Some(Commands::Memdump(a)) = args.command {
-        a
+pub fn dump_mem<O: ObjectModel>(object_model: O, args: Args) -> Result<()> {
+    let memdump_args = if let Some(Commands::Memdump(ref a)) = args.command {
+        a.clone()
     } else {
         panic!("Incorrect dispatch");
     };
@@ -150,7 +161,10 @@ pub fn dump_mem<O: ObjectModel>(_object_model: O, args: Args) -> Result<()> {
         );
         match memdump_args.workload {
             cli::MemdumpWorkload::LinkedList => {
-                linked_list::LinkedList::new(1024).gen_memdump(&mut memdump)
+                linked_list::LinkedList::new(1024).gen_memdump(object_model, args, &mut memdump)
+            }
+            cli::MemdumpWorkload::HeapDump => {
+                heap_dump::HeapDumpWorkload::new().gen_memdump(object_model, args, &mut memdump)
             }
         }
         memdump.dump_to_file(&memdump_args.output);

@@ -7,7 +7,7 @@ use crate::util::align_up;
 /// to be written (if the value is a pointer) and the destination.
 pub trait MemoryInterface {
     unsafe fn write_pointer_to_target<T>(&self, dst_host: *mut *const T, src_host: *const T);
-    unsafe fn write_value_to_target<T>(&self, dst_host: *mut T, src: T);
+    unsafe fn write_value_to_target<T: std::fmt::Debug>(&self, dst_host: *mut T, src: T);
 }
 
 /// Memory Interface for when host and target address space are the same.
@@ -37,29 +37,47 @@ impl MemoryInterface for NoOpMemoryInterface {
     }
 }
 
+/// Target/host address space aware bump allocation arena
 pub struct BumpAllocationArena {
-    cursor: *mut u8,
-    limit: *mut u8,
+    backing_mem_base: *mut u8,
+    backing_mem_cursor: *mut u8,
+    backing_mem_limit: *mut u8,
+    host_mem_base: *mut u8,
     align: usize,
 }
 
 impl BumpAllocationArena {
-    pub fn new(start: *mut u8, size: usize, align: usize) -> Self {
-        assert_eq!(start as usize % align, 0);
+    pub fn new(
+        backing_mem_base: *mut u8,
+        host_mem_base: *mut u8,
+        size: usize,
+        align: usize,
+    ) -> Self {
+        assert_eq!(backing_mem_base as usize % align, 0);
         assert_eq!(size % align, 0);
         Self {
-            cursor: start,
-            limit: unsafe { start.byte_offset(size as isize) },
+            backing_mem_base,
+            backing_mem_cursor: backing_mem_base,
+            backing_mem_limit: unsafe { backing_mem_base.byte_offset(size as isize) },
+            host_mem_base: host_mem_base,
             align,
         }
     }
 
-    pub fn alloc(&mut self, size: usize) -> *mut u8 {
-        let ret = self.cursor;
+    pub fn alloc(&mut self, size: usize) -> (*mut u8, *mut u8) {
+        let backing_ret = self.backing_mem_cursor;
         unsafe {
-            assert!(self.cursor.byte_offset(size as isize) <= self.limit);
-            self.cursor = self.cursor.byte_offset(align_up(size, self.align) as isize);
+            assert!(self.backing_mem_cursor.byte_offset(size as isize) <= self.backing_mem_limit);
+            self.backing_mem_cursor = self
+                .backing_mem_cursor
+                .byte_offset(align_up(size, self.align) as isize);
         }
-        ret
+        unsafe {
+            (
+                backing_ret,
+                self.host_mem_base
+                    .byte_offset(backing_ret.byte_offset_from(self.backing_mem_base)),
+            )
+        }
     }
 }

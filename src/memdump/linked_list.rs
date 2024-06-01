@@ -1,8 +1,7 @@
-use crate::MemoryInterface;
+use crate::{Args, MemoryInterface, ObjectModel};
 
 use super::MemdumpWorkload;
 
-///
 pub(super) struct LinkedList {
     num_nodes: usize,
 }
@@ -14,8 +13,13 @@ impl LinkedList {
 }
 
 impl MemdumpWorkload for LinkedList {
-    unsafe fn gen_memdump(&self, md: &mut super::Memdump) {
-        info!("Synthesized memdump of a linked list");
+    unsafe fn gen_memdump<O: ObjectModel>(
+        &self,
+        _object_model: O,
+        _args: Args,
+        md: &mut super::Memdump,
+    ) {
+        info!("Synthetic memdump of a linked list");
         // The address space of the linked list looks like
         // 0x0: number of root pointers, which is one
         // 0x8: the signular pointer to the start of the linked list

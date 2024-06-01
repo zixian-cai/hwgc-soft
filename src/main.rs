@@ -8,12 +8,14 @@ use hwgc_soft::NoOpMemoryInterface;
 use hwgc_soft::*;
 use std::time::Instant;
 
-fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+fn reified_main<O: ObjectModel>(object_model: O, args: Args) -> Result<()> {
     if let Some(ref cmd) = args.command {
         match cmd {
             Commands::Trace(_) => reified_main_host_memory(object_model, args),
             Commands::Analyze(_) => reified_main_host_memory(object_model, args),
             Commands::Depth(_) => reified_main_host_memory(object_model, args),
+            // Since memdump operates on target address space
+            // It will handle the memory interface and tib allocation arena
             Commands::Memdump(_) => dump_mem(object_model, args),
         }
     } else {
@@ -22,11 +24,19 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
 }
 
 fn reified_main_host_memory<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
-    // 32 MiB of memory for dynamically allocating TIB stuff
+    // 8 MiB of memory for dynamically allocating TIB stuff
+    // I previously measured that benchmarks allocate about 5000-6000 Klass objects using 4~6M
+    // Even with alignment encoding, it only uses about 0.5M more.
+    //
     // TODO make it a command line argument
-    let tib_arena_size: usize = 32 * 1024 * 1024;
+    let tib_arena_size: usize = 8 * 1024 * 1024;
     let tib_arena_backing = crate::util::mmap_anon(tib_arena_size).unwrap();
-    let mut tib_arena = BumpAllocationArena::new(tib_arena_backing as *mut u8, tib_arena_size, 16);
+    let mut tib_arena = BumpAllocationArena::new(
+        tib_arena_backing as *mut u8,
+        tib_arena_backing as *mut u8,
+        tib_arena_size,
+        16,
+    );
 
     for path in &args.paths {
         let start = Instant::now();

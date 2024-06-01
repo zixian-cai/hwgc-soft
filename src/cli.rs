@@ -87,4 +87,5 @@ fn num_parser(s: &str) -> Result<usize, &'static str> {
 #[clap(rename_all = "verbatim")]
 pub enum MemdumpWorkload {
     LinkedList,
+    HeapDump,
 }

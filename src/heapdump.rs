@@ -11,11 +11,26 @@ pub use generated_src::*;
 
 use super::util::{dzmmap_noreplace, munmap};
 
+#[derive(Debug)]
 pub enum Space {
     Immix,
     Immortal,
     Los,
     Nonmoving,
+}
+
+#[derive(Debug)]
+pub(crate) struct SpaceLimit {
+    pub(crate) space: Space,
+    pub(crate) space_base: u64,
+    pub(crate) space_start: u64,
+    pub(crate) space_limit: u64,
+}
+
+impl SpaceLimit {
+    pub(crate) fn get_size(&self) -> u64 {
+        self.space_limit - self.space_start
+    }
 }
 
 impl HeapDump {
@@ -33,6 +48,33 @@ impl HeapDump {
             dzmmap_noreplace(s.start, (s.end - s.start) as usize)?;
         }
         Ok(())
+    }
+
+    pub fn calculate_space_limits(&self) -> Vec<SpaceLimit> {
+        let mut limits = vec![];
+        for s in &self.spaces {
+            limits.push(SpaceLimit {
+                space: Self::get_space_type(s.start),
+                space_base: s.start,
+                space_start: u64::MAX,
+                space_limit: s.start,
+            });
+        }
+        for o in &self.objects {
+            let pos = limits.binary_search_by_key(&o.start, |s| s.space_base);
+            let obj_end = o.start + o.size;
+            let space_idx = match pos {
+                Ok(i) => i,
+                Err(i) => i - 1,
+            };
+            if obj_end > limits[space_idx].space_limit {
+                limits[space_idx].space_limit = obj_end;
+            }
+            if o.start < limits[space_idx].space_start {
+                limits[space_idx].space_start = o.start;
+            }
+        }
+        limits
     }
 
     pub fn unmap_spaces(&self) -> Result<()> {

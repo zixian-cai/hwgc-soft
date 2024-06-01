@@ -31,16 +31,31 @@ impl<const HEADER: bool> Default for BidirectionalObjectModel<HEADER> {
     }
 }
 
-fn alloc_tib(tib: impl FnOnce() -> Tib) -> &'static Tib {
+#[derive(Clone, Copy)]
+struct TibPtr {
+    backing_storage: u64,
+    host_ptr: u64,
+}
+
+impl TibPtr {
+    fn get_ref(&self) -> &'static Tib {
+        unsafe { &*(self.backing_storage as *const Tib) as &'static Tib }
+    }
+}
+
+fn alloc_tib(tib: impl FnOnce() -> Tib, tib_arena: &mut BumpAllocationArena) -> TibPtr {
     unsafe {
-        let storage = alloc::alloc(Layout::new::<Tib>()) as *mut Tib;
-        ptr::write(storage, tib());
-        storage.as_ref().unwrap()
+        let (backing_storage, host_ptr) = tib_arena.alloc(Layout::new::<Tib>().size());
+        ptr::write(backing_storage as *mut Tib, tib());
+        TibPtr {
+            backing_storage: backing_storage as u64,
+            host_ptr: host_ptr as u64,
+        }
     }
 }
 
 lazy_static! {
-    static ref TIBS: Mutex<HashMap<u64, &'static Tib>> = Mutex::new(HashMap::new());
+    static ref TIBS: Mutex<HashMap<u64, TibPtr>> = Mutex::new(HashMap::new());
 }
 
 #[repr(C)]
@@ -69,30 +84,46 @@ impl Tib {
     const STATUS_BYTE_OFFSET: u8 = 1;
     const NUMREFS_BYTE_OFFSET: u8 = 2;
 
-    fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> &'static Tib {
+    fn insert_with_cache(
+        klass: u64,
+        tib: impl FnOnce() -> Tib,
+        tib_arena: &mut BumpAllocationArena,
+    ) -> TibPtr {
         let mut tibs = TIBS.lock().unwrap();
-        tibs.entry(klass).or_insert_with(|| alloc_tib(tib));
-        tibs.get(&klass).unwrap()
+        tibs.entry(klass)
+            .or_insert_with(|| alloc_tib(tib, tib_arena));
+        *tibs.get(&klass).unwrap()
     }
 
-    fn objarray(klass: u64) -> &'static Tib {
-        Self::insert_with_cache(klass, || Tib {
-            ttype: TibType::ObjArray,
-            num_refs: 0,
-        })
+    fn objarray(klass: u64, tib_arena: &mut BumpAllocationArena) -> TibPtr {
+        Self::insert_with_cache(
+            klass,
+            || Tib {
+                ttype: TibType::ObjArray,
+                num_refs: 0,
+            },
+            tib_arena,
+        )
     }
 
-    fn non_objarray(klass: u64, obj: &HeapObject) -> &'static Tib {
+    fn non_objarray(klass: u64, obj: &HeapObject, tib_arena: &mut BumpAllocationArena) -> TibPtr {
         if obj.instance_mirror_start.is_some() {
-            alloc_tib(|| Tib {
-                ttype: TibType::Ordinary,
-                num_refs: obj.edges.len() as u64,
-            })
+            alloc_tib(
+                || Tib {
+                    ttype: TibType::Ordinary,
+                    num_refs: obj.edges.len() as u64,
+                },
+                tib_arena,
+            )
         } else {
-            Self::insert_with_cache(klass, || Tib {
-                ttype: TibType::Ordinary,
-                num_refs: obj.edges.len() as u64,
-            })
+            Self::insert_with_cache(
+                klass,
+                || Tib {
+                    ttype: TibType::Ordinary,
+                    num_refs: obj.edges.len() as u64,
+                },
+                tib_arena,
+            )
         }
     }
 
@@ -202,9 +233,9 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
         for object in &heapdump.objects {
             let is_objarray = object.objarray_length.is_some();
             if is_objarray {
-                let _tib = Tib::objarray(object.klass);
+                let _tib = Tib::objarray(object.klass, tib_arena);
             } else if object.instance_mirror_start.is_none() {
-                let _tib = Tib::non_objarray(object.klass, object);
+                let _tib = Tib::non_objarray(object.klass, object, tib_arena);
             };
         }
         let after_size = TIBS.lock().unwrap().len();
@@ -253,23 +284,25 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
         // Second pass: deserilize object and update edges
         for object in &heapdump.objects {
             let is_objarray = object.objarray_length.is_some();
-            let tib = if is_objarray {
-                Tib::objarray(object.klass)
+            let tib_ptr = if is_objarray {
+                Tib::objarray(object.klass, tib_arena)
             } else {
-                Tib::non_objarray(object.klass, object)
+                Tib::non_objarray(object.klass, object, tib_arena)
             };
+            let tib = tib_ptr.get_ref();
             if !is_objarray {
                 debug_assert_eq!(tib.num_refs, object.edges.len() as u64);
             }
             let header = tib.encode_header();
-            // We need to leak this, so the underlying memory won't be collected
-            let tib_ptr = tib as *const Tib;
             let new_start = *self.forwarding.get(&object.start).unwrap();
             unsafe {
                 if HEADER {
                     header.store_via_memif(new_start, memif);
                 }
-                memif.write_pointer_to_target((new_start + 8) as *mut *const Tib, tib_ptr);
+                memif.write_pointer_to_target(
+                    (new_start + 8) as *mut *const Tib,
+                    tib_ptr.host_ptr as *const Tib,
+                );
             }
             // Write out array length for obj array
             if let Some(l) = object.objarray_length {
