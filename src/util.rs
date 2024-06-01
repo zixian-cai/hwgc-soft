@@ -15,7 +15,7 @@ fn wrap_libc_call<T: PartialEq>(f: &dyn Fn() -> T, expect: T) -> Result<()> {
     }
 }
 
-fn mmap_fixed(start: u64, size: usize, prot: libc::c_int, flags: libc::c_int) -> Result<()> {
+pub fn mmap_fixed(start: u64, size: usize, prot: libc::c_int, flags: libc::c_int) -> Result<()> {
     let ptr = start as *mut libc::c_void;
     wrap_libc_call(
         &|| unsafe { libc::mmap(ptr, size, prot, flags, -1, 0) },

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::ptr;
 use std::sync::Mutex;
 
-use crate::{HeapDump, HeapObject, MemoryInterface, ObjectModel};
+use crate::{BumpAllocationArena, HeapDump, HeapObject, MemoryInterface, ObjectModel};
 
 use super::{HasTibType, Header, TibType};
 
@@ -189,7 +189,12 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
         self.object_sizes.clear();
     }
 
-    fn restore_tibs<M>(&mut self, heapdump: &HeapDump, memif: &M) -> usize
+    fn restore_tibs<M>(
+        &mut self,
+        heapdump: &HeapDump,
+        memif: &M,
+        tib_arena: &mut BumpAllocationArena,
+    ) -> usize
     where
         M: MemoryInterface,
     {
@@ -206,8 +211,12 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
         after_size - before_size
     }
 
-    fn restore_objects<M>(&mut self, heapdump: &HeapDump, memif: &M)
-    where
+    fn restore_objects<M>(
+        &mut self,
+        heapdump: &HeapDump,
+        memif: &M,
+        tib_arena: &mut BumpAllocationArena,
+    ) where
         M: MemoryInterface,
     {
         // First pass: calculate forwarding table

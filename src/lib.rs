@@ -15,7 +15,7 @@ mod memdump;
 mod memif;
 mod object_model;
 mod trace;
-mod util;
+pub mod util;
 
 pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

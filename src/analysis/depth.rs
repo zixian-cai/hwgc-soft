@@ -11,7 +11,11 @@ use std::{
 
 type Depth = u64;
 
-pub fn object_depth<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+pub fn object_depth<O: ObjectModel>(
+    mut object_model: O,
+    mut tib_arena: BumpAllocationArena,
+    args: Args,
+) -> Result<()> {
     let object_depth_args = if let Some(Commands::Depth(a)) = args.command {
         a
     } else {
@@ -22,7 +26,7 @@ pub fn object_depth<O: ObjectModel>(mut object_model: O, args: Args) -> Result<(
         let heapdump = HeapDump::from_binpb_zst(path)?;
         object_model.reset();
         heapdump.map_spaces()?;
-        object_model.restore_objects(&heapdump, &NoOpMemoryInterface::new());
+        object_model.restore_objects(&heapdump, &NoOpMemoryInterface::new(), &mut tib_arena);
         let mut depth_hist: HashMap<Depth, u64> = HashMap::new();
         let mut mark_queue: VecDeque<(u64, Depth)> = VecDeque::new();
         for root in object_model.roots() {

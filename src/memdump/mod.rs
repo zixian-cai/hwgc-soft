@@ -31,6 +31,12 @@ struct MemdumpMapping {
     size: usize,
 }
 
+impl MemdumpMapping {
+    fn to_arena(&self, align: usize) -> BumpAllocationArena {
+        BumpAllocationArena::new(self.backing_memory_start, self.size, align)
+    }
+}
+
 struct MemdumpMemoryInterface {
     sorted_mappings: Vec<MemdumpMapping>,
 }

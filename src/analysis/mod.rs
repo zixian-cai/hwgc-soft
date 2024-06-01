@@ -73,7 +73,11 @@ impl Analysis {
     }
 }
 
-pub fn reified_analysis<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+pub fn reified_analysis<O: ObjectModel>(
+    mut object_model: O,
+    mut tib_arena: BumpAllocationArena,
+    args: Args,
+) -> Result<()> {
     let analysis_args = if let Some(Commands::Analyze(a)) = args.command {
         a
     } else {
@@ -94,7 +98,11 @@ pub fn reified_analysis<O: ObjectModel>(mut object_model: O, args: Args) -> Resu
         // mmap
         heapdump.map_spaces()?;
         // write objects to the heap
-        object_model.restore_objects::<NoOpMemoryInterface>(&heapdump, &NoOpMemoryInterface::new());
+        object_model.restore_objects::<NoOpMemoryInterface>(
+            &heapdump,
+            &NoOpMemoryInterface::new(),
+            &mut tib_arena,
+        );
         analysis.run(&object_model);
         let duration = start.elapsed();
         println!(

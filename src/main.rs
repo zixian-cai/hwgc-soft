@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate log;
+use anyhow::anyhow;
 use anyhow::Result;
 
 use clap::Parser;
@@ -8,13 +9,35 @@ use hwgc_soft::*;
 use std::time::Instant;
 
 fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+    if let Some(ref cmd) = args.command {
+        match cmd {
+            Commands::Trace(_) => reified_main_host_memory(object_model, args),
+            Commands::Analyze(_) => reified_main_host_memory(object_model, args),
+            Commands::Depth(_) => reified_main_host_memory(object_model, args),
+            Commands::Memdump(_) => dump_mem(object_model, args),
+        }
+    } else {
+        Ok(())
+    }
+}
+
+fn reified_main_host_memory<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+    // 32 MiB of memory for dynamically allocating TIB stuff
+    // TODO make it a command line argument
+    let tib_arena_size: usize = 32 * 1024 * 1024;
+    let tib_arena_backing = crate::util::mmap_anon(tib_arena_size).unwrap();
+    let mut tib_arena = BumpAllocationArena::new(tib_arena_backing as *mut u8, tib_arena_size, 16);
+
     for path in &args.paths {
         let start = Instant::now();
         let heapdump = HeapDump::from_binpb_zst(path)?;
         // TODO: Should use target memory address when restoring tib
         // for memdump
-        let tibs_cached = object_model
-            .restore_tibs::<NoOpMemoryInterface>(&heapdump, &NoOpMemoryInterface::new());
+        let tibs_cached = object_model.restore_tibs::<NoOpMemoryInterface>(
+            &heapdump,
+            &NoOpMemoryInterface::new(),
+            &mut tib_arena,
+        );
         let elapsed = start.elapsed();
         info!(
             "{} extra TIBs cached from processing {} in {} ms",
@@ -26,10 +49,10 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
 
     if let Some(ref cmd) = args.command {
         match cmd {
-            Commands::Trace(_) => reified_trace(object_model, args),
-            Commands::Analyze(_) => reified_analysis(object_model, args),
-            Commands::Depth(_) => object_depth(object_model, args),
-            Commands::Memdump(_) => dump_mem(object_model, args),
+            Commands::Trace(_) => reified_trace(object_model, tib_arena, args),
+            Commands::Analyze(_) => reified_analysis(object_model, tib_arena, args),
+            Commands::Depth(_) => object_depth(object_model, tib_arena, args),
+            Commands::Memdump(_) => Err(anyhow!("Should be handled elsewhere")),
         }
     } else {
         Ok(())

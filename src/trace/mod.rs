@@ -148,7 +148,11 @@ fn verify_mark<O: ObjectModel>(mark_sense: u8, object_model: &mut O) {
     }
 }
 
-pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+pub fn reified_trace<O: ObjectModel>(
+    mut object_model: O,
+    mut tib_arena: BumpAllocationArena,
+    args: Args,
+) -> Result<()> {
     let trace_args = if let Some(Commands::Trace(a)) = args.command {
         a
     } else {
@@ -173,8 +177,11 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         // write objects to the heap
         {
             let start = Instant::now();
-            object_model
-                .restore_objects::<NoOpMemoryInterface>(&heapdump, &NoOpMemoryInterface::new());
+            object_model.restore_objects::<NoOpMemoryInterface>(
+                &heapdump,
+                &NoOpMemoryInterface::new(),
+                &mut tib_arena,
+            );
             let elapsed = start.elapsed();
             info!(
                 "Finish deserializing the heapdump, {} objects in {} ms",

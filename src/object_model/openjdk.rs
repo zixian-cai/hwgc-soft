@@ -1,4 +1,4 @@
-use crate::constants::*;
+use crate::{constants::*, BumpAllocationArena};
 use crate::{HeapDump, HeapObject, MemoryInterface, ObjectModel};
 use fixedbitset::FixedBitSet;
 use std::alloc::{self, Layout};
@@ -389,7 +389,12 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
         self.object_sizes.clear();
     }
 
-    fn restore_tibs<M>(&mut self, heapdump: &HeapDump, memif: &M) -> usize
+    fn restore_tibs<M>(
+        &mut self,
+        heapdump: &HeapDump,
+        memif: &M,
+        tib_arena: &mut BumpAllocationArena,
+    ) -> usize
     where
         M: MemoryInterface,
     {
@@ -406,8 +411,12 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
         after_size - before_size
     }
 
-    fn restore_objects<M>(&mut self, heapdump: &HeapDump, memif: &M)
-    where
+    fn restore_objects<M>(
+        &mut self,
+        heapdump: &HeapDump,
+        memif: &M,
+        tib_arena: &mut BumpAllocationArena,
+    ) where
         M: MemoryInterface,
     {
         for object in &heapdump.objects {

@@ -1,4 +1,4 @@
-use crate::memif::MemoryInterface;
+use crate::{memif::MemoryInterface, BumpAllocationArena};
 use std::collections::HashMap;
 
 use crate::HeapDump;
@@ -26,16 +26,27 @@ pub trait ObjectModel: Send + 'static {
     type Tib: HasTibType;
     /// Restore TIBs for classes found in the heapdump
     ///
+    /// Return how many new TIBs are restored from this heapdump
+    ///
     /// Cache these TIBs across multiple calls, so already-known types
     /// don't need to have TIBs allocated multiple times.
     ///
     /// Note that InstanceMirrorKlass (i.e., those objects whose
     /// instance_mirror_start is some) is never cached.
-    fn restore_tibs<M>(&mut self, heapdump: &HeapDump, memif: &M) -> usize
+    fn restore_tibs<M>(
+        &mut self,
+        heapdump: &HeapDump,
+        memif: &M,
+        tib_arena: &mut BumpAllocationArena,
+    ) -> usize
     where
         M: MemoryInterface;
-    fn restore_objects<M>(&mut self, heapdump: &HeapDump, memif: &M)
-    where
+    fn restore_objects<M>(
+        &mut self,
+        heapdump: &HeapDump,
+        memif: &M,
+        tib_arena: &mut BumpAllocationArena,
+    ) where
         M: MemoryInterface;
     fn scan_object<F>(o: u64, callback: F)
     where
