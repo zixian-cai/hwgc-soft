@@ -53,17 +53,17 @@ impl MemdumpWorkload for HeapDumpWorkload {
             md.new_mapping(limit.space_start as *mut u8, limit.get_size() as usize);
         }
         let memif = md.gen_memif();
-        info!("Write out roots");
-        memif.write_value_to_target(0 as *mut u64, heapdump.roots.len() as u64);
-        for (i, root) in heapdump.roots.iter().enumerate() {
-            memif.write_pointer_to_target(
-                (8usize + 8 * i) as *mut *const u64,
-                root.objref as *const u64,
-            );
-        }
+        info!("Write out {} roots", heapdump.roots.len());
+        memif.write_value_to_target(0x1000 as *mut u64, heapdump.roots.len() as u64);
         info!("Restoring TIBs onto the arena");
         object_model.restore_tibs(&heapdump, &memif, &mut tib_arena);
         info!("Restoring objects");
         object_model.restore_objects(&heapdump, &memif, &mut tib_arena);
+        for (i, root) in object_model.roots().iter().enumerate() {
+            memif.write_pointer_to_target(
+                (0x1008usize + 8 * i) as *mut *const u64,
+                *root as *const u64,
+            );
+        }
     }
 }
