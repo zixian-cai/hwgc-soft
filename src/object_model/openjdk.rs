@@ -442,18 +442,19 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
             // Initialize the object
             // Set tib
             unsafe {
-                std::ptr::write::<u64>((o.start + 8) as *mut u64, tib_ptr as u64);
+                memif.write_pointer_to_target((o.start + 8) as *mut *const Tib, tib_ptr);
             }
             // Write out array length for obj array
             if let Some(l) = o.objarray_length {
                 unsafe {
-                    std::ptr::write::<u64>((o.start + 16) as *mut u64, l);
+                    memif.write_value_to_target((o.start + 16) as *mut u64, l);
                 }
             }
             // Write out each non-zero ref field
             for e in &o.edges {
                 unsafe {
-                    std::ptr::write::<u64>(e.slot as *mut u64, e.objref);
+                    memif
+                        .write_pointer_to_target(e.slot as *mut *const u64, e.objref as *const u64);
                 }
             }
             self.object_sizes.insert(o.start, o.size);
