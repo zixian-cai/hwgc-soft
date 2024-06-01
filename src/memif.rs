@@ -8,6 +8,7 @@ use crate::util::align_up;
 pub trait MemoryInterface {
     unsafe fn write_pointer_to_target<T>(&self, dst_host: *mut *const T, src_host: *const T);
     unsafe fn write_value_to_target<T: std::fmt::Debug>(&self, dst_host: *mut T, src: T);
+    unsafe fn translate_host_to_target<T>(&self, ptr_host: *const T) -> *const T;
 }
 
 /// Memory Interface for when host and target address space are the same.
@@ -34,6 +35,10 @@ impl MemoryInterface for NoOpMemoryInterface {
 
     unsafe fn write_value_to_target<T>(&self, dst_host: *mut T, src: T) {
         std::ptr::write::<T>(dst_host, src);
+    }
+
+    unsafe fn translate_host_to_target<T>(&self, ptr_host: *const T) -> *const T {
+        ptr_host
     }
 }
 

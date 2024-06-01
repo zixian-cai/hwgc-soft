@@ -29,9 +29,10 @@ impl MemdumpWorkload for HeapDumpWorkload {
         info!("Generating memdump of heapdump: {}", &args.paths[0]);
         let heapdump = HeapDump::from_binpb_zst(&args.paths[0]).unwrap();
         let space_limits = heapdump.calculate_space_limits();
-        // Reserve memory for roots at host address 0x0 plus one word for the number of words
+        // Don't use 0x0. Otherwise, actual null pointers might be mistranslated.
+        // Reserve memory for roots at host address 0x1000 plus one word for the number of words
         let roots_size = (heapdump.roots.len() + 1) * 8;
-        let _roots_mapping = md.new_mapping(0 as *mut u8, roots_size);
+        let _roots_mapping = md.new_mapping(0x1000 as *mut u8, roots_size);
         // Reserve 8M of memory for TIBs at host address 0x1000_0000, no one is probably using that
         // low a memory, and 0x1000_0000 is high level to accommodate the number of roots
         let tib_mapping = md.new_mapping(0x1000_0000usize as *mut u8, 8 * 1024 * 1024);

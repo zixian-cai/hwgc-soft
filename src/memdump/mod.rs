@@ -89,7 +89,11 @@ impl MemdumpMemoryInterface {
 impl MemoryInterface for MemdumpMemoryInterface {
     unsafe fn write_pointer_to_target<T>(&self, dst_host: *mut *const T, src_host: *const T) {
         let dst_backing = self.translate_to_backing(dst_host);
-        let src_target = self.translate_to_target(src_host);
+        let src_target = if src_host == std::ptr::null() {
+            std::ptr::null()
+        } else {
+            self.translate_to_target(src_host)
+        };
         // dbg!(dst_host, src_host);
         // dbg!(dst_backing, src_target);
         std::ptr::write(dst_backing as *mut *const T, src_target as *const T);
@@ -100,6 +104,10 @@ impl MemoryInterface for MemdumpMemoryInterface {
         // dbg!(dst_host, &src);
         // dbg!(dst_backing);
         std::ptr::write(dst_backing as *mut T, src);
+    }
+
+    unsafe fn translate_host_to_target<T>(&self, ptr_host: *const T) -> *const T {
+        self.translate_to_target(ptr_host) as *const T
     }
 }
 
@@ -117,6 +125,7 @@ impl Memdump {
     }
 
     fn new_mapping(&mut self, host_memory_start: *mut u8, size: usize) -> MemdumpMapping {
+        assert_ne!(host_memory_start as usize, 0);
         let size_aligned = crate::util::align_up(size, 4096);
         let old_cursor = self.backing_memory_cursor;
         let new_cursor = self.backing_memory_cursor.wrapping_add(size_aligned);

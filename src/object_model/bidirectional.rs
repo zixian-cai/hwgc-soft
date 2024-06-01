@@ -332,6 +332,7 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
             }
             debug_assert_eq!(ref_cursor, object.start + object.size);
             self.object_sizes.insert(new_start, object.size);
+            // println!("Obj {:?}, refs {}", unsafe {memif.translate_host_to_target(new_start as *const u64)}, object.edges.len());
         }
     }
 
