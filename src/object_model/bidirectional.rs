@@ -61,8 +61,8 @@ lazy_static! {
 #[repr(C)]
 #[derive(Debug)]
 pub struct Tib {
-    ttype: TibType,
     num_refs: u64,
+    ttype: TibType
 }
 
 impl HasTibType for Tib {
