@@ -20,11 +20,12 @@ impl ObjectShape {
         } else if obj.edges.is_empty() {
             ObjectShape::NoRef
         } else {
-            let offsets: Vec<i64> = obj
+            let mut offsets: Vec<i64> = obj
                 .edges
                 .iter()
                 .map(|e| e.slot as i64 - obj.start as i64)
                 .collect();
+            offsets.sort();
             ObjectShape::Refs(offsets)
         }
     }
