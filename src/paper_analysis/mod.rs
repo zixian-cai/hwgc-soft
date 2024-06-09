@@ -1,15 +1,16 @@
 use crate::*;
 use anyhow::Result;
+use polars::prelude::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 enum ObjectShape {
     NoRef,
     RefArray,
-    Refs(Vec<u64>),
+    Refs(Vec<i64>),
 }
 
 impl ObjectShape {
@@ -19,8 +20,20 @@ impl ObjectShape {
         } else if obj.edges.is_empty() {
             ObjectShape::NoRef
         } else {
-            let offsets: Vec<u64> = obj.edges.iter().map(|e| e.slot - obj.start).collect();
+            let offsets: Vec<i64> = obj
+                .edges
+                .iter()
+                .map(|e| e.slot as i64 - obj.start as i64)
+                .collect();
             ObjectShape::Refs(offsets)
+        }
+    }
+
+    fn into_array(self) -> Vec<i64> {
+        match self {
+            ObjectShape::NoRef => vec![],
+            ObjectShape::RefArray => vec![i64::MIN],
+            ObjectShape::Refs(r) => r,
         }
     }
 }
@@ -72,14 +85,14 @@ fn analyze_benchmark(bm_path: &Path) -> Result<CountMap> {
     Ok(shape_count)
 }
 
-// cargo run -- ../heapdumps/sampled  -o OpenJDK paper-analyze
-pub fn reified_paper_analysis<O: ObjectModel>(mut _object_model: O, args: Args) -> Result<()> {
+// RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run --release -- ../heapdumps/sampled -o OpenJDK paper-analyze --analysis-name ShapeDemographic -o shapes.parquet
+fn shape_demographic(paths: &[String], analysis_args: PaperAnalysisArgs) -> Result<()> {
     assert_eq!(
-        args.paths.len(),
+        paths.len(),
         1,
         "Should only have one path that is a folder contains subfolders for different benchmarks"
     );
-    let heapdump_path = Path::new(args.paths.first().unwrap());
+    let heapdump_path = Path::new(paths.first().unwrap());
     assert!(heapdump_path.is_dir());
     let bms: Vec<PathBuf> = fs::read_dir(heapdump_path)?
         .filter_map(|entry| {
@@ -100,12 +113,45 @@ pub fn reified_paper_analysis<O: ObjectModel>(mut _object_model: O, args: Args) 
             (bm_name, analyze_benchmark(b).unwrap())
         })
         .collect();
-    println!("{:?}", bm_countmaps);
-    // let analysis_args = if let Some(Commands::PaperAnalyze(a)) = args.command {
-    //     a
-    // } else {
-    //     panic!("Incorrect dispatch");
-    // };
 
+    let mut lfs = vec![];
+    for (bm, count_map) in bm_countmaps {
+        let (shapes, counts): (Vec<Series>, Vec<u64>) = count_map
+            .iter()
+            .map(|(a, b)| (a.clone().into_array().iter().collect::<Series>(), *b as u64))
+            .unzip();
+        let lf: LazyFrame = df!(
+            "shape" => &shapes,
+            "count" => &counts,
+        )
+        .unwrap()
+        .lazy();
+        let lf = lf.with_column(lit(bm).alias("bm"));
+        lfs.push(lf);
+    }
+    let lf = concat(
+        lfs,
+        UnionArgs {
+            parallel: true,
+            ..Default::default()
+        },
+    )?;
+    let mut df = lf.collect()?;
+    df.as_single_chunk_par();
+    let file = File::create(analysis_args.output_path)?;
+    let writer = ParquetWriter::new(file);
+    writer.finish(&mut df)?;
     Ok(())
+}
+
+pub fn reified_paper_analysis<O: ObjectModel>(mut _object_model: O, args: Args) -> Result<()> {
+    let analysis_args = if let Some(Commands::PaperAnalyze(a)) = args.command {
+        a
+    } else {
+        panic!("Incorrect dispatch");
+    };
+
+    match analysis_args.analysis_name {
+        PaperAnalysisChoice::ShapeDemographic => shape_demographic(&args.paths, analysis_args),
+    }
 }

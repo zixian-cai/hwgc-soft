@@ -54,8 +54,19 @@ pub struct DepthArgs {
     pub(crate) output_file: String,
 }
 
-#[derive(Parser, Debug, Clone, Copy)]
-pub struct PaperAnalysisArgs {}
+#[derive(Parser, Debug, Clone)]
+pub struct PaperAnalysisArgs {
+    #[arg(short, long, value_enum)]
+    pub(crate) analysis_name: PaperAnalysisChoice,
+    #[arg(short, long)]
+    pub(crate) output_path: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all = "verbatim")]
+pub enum PaperAnalysisChoice {
+    ShapeDemographic,
+}
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
