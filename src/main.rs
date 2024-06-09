@@ -7,6 +7,10 @@ use hwgc_soft::*;
 use std::time::Instant;
 
 fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+    if let Some(Commands::PaperAnalyze(_)) = args.command {
+        return reified_paper_analysis(object_model, args);
+    }
+
     for path in &args.paths {
         let start = Instant::now();
         let heapdump = HeapDump::from_binpb_zst(path)?;
@@ -25,6 +29,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
             Commands::Trace(_) => reified_trace(object_model, args),
             Commands::Analyze(_) => reified_analysis(object_model, args),
             Commands::Depth(_) => object_depth(object_model, args),
+            _ => unreachable!(),
         }
     } else {
         Ok(())
