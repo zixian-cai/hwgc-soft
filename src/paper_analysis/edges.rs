@@ -6,19 +6,27 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
+type CountMap = HashMap<u32, usize>;
+
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
-enum ObjectShape {
-    NoRef,
-    RefArray,
-    Refs(Vec<i64>),
+struct EdgeChunk {
+    chunk_size_log: u32,
+    edge_count: usize,
 }
 
-impl ObjectShape {
-    fn from_object(obj: &HeapObject) -> ObjectShape {
-        if obj.objarray_length.is_some() {
-            ObjectShape::RefArray
+impl EdgeChunk {
+    fn log2_ceil(x: usize) -> u32 {
+        usize::BITS - x.leading_zeros()
+    }
+
+    fn from_object(obj: &HeapObject) -> Vec<EdgeChunk> {
+        if let Some(l) = obj.objarray_length {
+            vec![EdgeChunk {
+                chunk_size_log: Self::log2_ceil(l as usize),
+                edge_count: l as usize,
+            }]
         } else if obj.edges.is_empty() {
-            ObjectShape::NoRef
+            vec![]
         } else {
             let mut offsets: Vec<i64> = obj
                 .edges
@@ -26,24 +34,36 @@ impl ObjectShape {
                 .map(|e| e.slot as i64 - obj.start as i64)
                 .collect();
             offsets.sort();
-            ObjectShape::Refs(offsets)
-        }
-    }
-
-    fn into_array(self) -> Vec<i64> {
-        match self {
-            ObjectShape::NoRef => vec![],
-            ObjectShape::RefArray => vec![i64::MIN],
-            ObjectShape::Refs(r) => r,
+            let mut i = 1;
+            let mut chunk_size: usize = 1;
+            let mut counts = vec![];
+            while i < offsets.len() {
+                if offsets[i] != offsets[i - 1] + 8 {
+                    // not contiguous, push old chunk
+                    counts.push(EdgeChunk {
+                        chunk_size_log: Self::log2_ceil(chunk_size),
+                        edge_count: chunk_size,
+                    });
+                    // start a new chunk
+                    chunk_size = 1;
+                } else {
+                    chunk_size += 1;
+                }
+                i += 1;
+            }
+            counts.push(EdgeChunk {
+                chunk_size_log: Self::log2_ceil(chunk_size),
+                edge_count: chunk_size,
+            });
+            // println!("{:?} {:?}", offsets, counts);
+            counts
         }
     }
 }
 
-type CountMap = HashMap<ObjectShape, usize>;
-
 fn merge_counts(count_a: &mut CountMap, count_b: &CountMap) {
     for (key, val) in count_b.iter() {
-        *count_a.entry(key.clone()).or_default() += val;
+        *count_a.entry(*key).or_default() += val;
     }
 }
 
@@ -55,9 +75,10 @@ fn analyze_one_file(path: &Path) -> Result<CountMap> {
         .fold(
             HashMap::new,
             |mut partial_count: CountMap, object: &HeapObject| {
-                *partial_count
-                    .entry(ObjectShape::from_object(object))
-                    .or_default() += 1;
+                let chunks = EdgeChunk::from_object(object);
+                chunks.iter().for_each(|c| {
+                    *partial_count.entry(c.chunk_size_log).or_default() += c.edge_count
+                });
                 partial_count
             },
         )
@@ -86,8 +107,7 @@ fn analyze_benchmark(bm_path: &Path) -> Result<CountMap> {
     Ok(shape_count)
 }
 
-// RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run --release -- ../heapdumps/sampled -o OpenJDK paper-analyze --analysis-name ShapeDemographic -o shapes.parquet
-pub(super) fn shape_demographic(paths: &[String], analysis_args: PaperAnalysisArgs) -> Result<()> {
+pub(super) fn edge_chunks(paths: &[String], analysis_args: PaperAnalysisArgs) -> Result<()> {
     assert_eq!(
         paths.len(),
         1,
@@ -117,13 +137,11 @@ pub(super) fn shape_demographic(paths: &[String], analysis_args: PaperAnalysisAr
 
     let mut lfs = vec![];
     for (bm, count_map) in bm_countmaps {
-        let (shapes, counts): (Vec<Series>, Vec<u64>) = count_map
-            .iter()
-            .map(|(a, b)| (a.clone().into_array().iter().collect::<Series>(), *b as u64))
-            .unzip();
+        let (chunk_size_log, edges): (Vec<u32>, Vec<u64>) =
+            count_map.iter().map(|(a, b)| (*a, *b as u64)).unzip();
         let lf: LazyFrame = df!(
-            "shape" => &shapes,
-            "count" => &counts,
+            "chunk_size_log" => &chunk_size_log,
+            "edges" => &edges,
         )
         .unwrap()
         .lazy();

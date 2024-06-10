@@ -66,6 +66,7 @@ pub struct PaperAnalysisArgs {
 #[clap(rename_all = "verbatim")]
 pub enum PaperAnalysisChoice {
     ShapeDemographic,
+    EdgeChunks,
 }
 
 #[derive(Subcommand, Debug)]
