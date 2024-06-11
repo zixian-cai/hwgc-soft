@@ -64,7 +64,7 @@ impl BumpAllocationArena {
             backing_mem_base,
             backing_mem_cursor: backing_mem_base,
             backing_mem_limit: unsafe { backing_mem_base.byte_offset(size as isize) },
-            host_mem_base: host_mem_base,
+            host_mem_base,
             align,
         }
     }

@@ -88,4 +88,5 @@ fn num_parser(s: &str) -> Result<usize, &'static str> {
 pub enum MemdumpWorkload {
     LinkedList,
     HeapDump,
+    HeapLinkedList,
 }

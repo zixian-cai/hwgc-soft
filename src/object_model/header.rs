@@ -4,6 +4,12 @@ use std::sync::atomic::{AtomicU8, Ordering};
 #[repr(transparent)]
 pub struct Header(u64);
 
+impl From<Header> for u64 {
+    fn from(value: Header) -> Self {
+        value.0
+    }
+}
+
 impl Header {
     pub fn new() -> Self {
         Header(0)

@@ -1,4 +1,4 @@
-use std::alloc::{self, Layout};
+use std::alloc::Layout;
 use std::collections::HashMap;
 use std::ptr;
 use std::sync::Mutex;
@@ -62,7 +62,7 @@ lazy_static! {
 #[derive(Debug)]
 pub struct Tib {
     num_refs: u64,
-    ttype: TibType
+    ttype: TibType,
 }
 
 impl HasTibType for Tib {

@@ -175,6 +175,13 @@ pub fn dump_mem<O: ObjectModel>(object_model: O, args: Args) -> Result<()> {
             cli::MemdumpWorkload::HeapDump => {
                 heap_dump::HeapDumpWorkload::new().gen_memdump(object_model, args, &mut memdump)
             }
+            cli::MemdumpWorkload::HeapLinkedList => {
+                linked_list::HeapLinkedList::new(1024, 1, 6, None).gen_memdump(
+                    object_model,
+                    args,
+                    &mut memdump,
+                )
+            }
         }
         memdump.dump_to_file(&memdump_args.output);
     }
