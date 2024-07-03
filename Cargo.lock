@@ -880,9 +880,9 @@ dependencies = [
 
 [[package]]
 name = "harness"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c65afa50ba66a72ba977b35503f625e6cd796c22dc7bfcf2727207ecf755191b"
+checksum = "d855b92a4629a8003b2dc0bd07e7725981ebf51f96e287328e69f11d3481e9e7"
 dependencies = [
  "anyhow",
  "clap",
@@ -907,9 +907,9 @@ dependencies = [
 
 [[package]]
 name = "harness-probe-perf"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "454af3ad9a505df62581e37c0139417d95d74f66d2cc87548a1b9fa774321313"
+checksum = "13ffc4dfd2b883cfe3af9f4c31ea82a9cedfb299ef73fd9f8f0500551c192563"
 dependencies = [
  "harness",
  "pfm",
