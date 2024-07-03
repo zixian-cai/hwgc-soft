@@ -61,17 +61,6 @@ slower_root_scanning = []
 [profile.release]
 # lto = true
 
-[[bench]]
-name = "fop"
-harness = false
-
-[[bench]]
-name = "pmd"
-harness = false
-
-[[bench]]
-name = "tradesoap"
-harness = false
 
 [[bench]]
 name = "avrora"
@@ -90,8 +79,61 @@ name = "eclipse"
 harness = false
 
 [[bench]]
+name = "fop"
+harness = false
+
+[[bench]]
+name = "graphchi"
+harness = false
+
+[[bench]]
+name = "h2o"
+harness = false
+
+[[bench]]
+name = "jme"
+harness = false
+
+[[bench]]
+name = "jython"
+harness = false
+
+[[bench]]
+name = "kafka"
+harness = false
+
+[[bench]]
+name = "luindex"
+harness = false
+
+[[bench]]
 name = "lusearch"
 harness = false
+
+[[bench]]
+name = "pmd"
+harness = false
+
+[[bench]]
+name = "spring"
+harness = false
+
+[[bench]]
+name = "sunflow"
+harness = false
+
+[[bench]]
+name = "tradesoap"
+harness = false
+
+[[bench]]
+name = "xalan"
+harness = false
+
+[[bench]]
+name = "zxing"
+harness = false
+
 
 [package.metadata.harness.profiles.default.builds]
 edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
