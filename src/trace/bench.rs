@@ -31,13 +31,7 @@ impl BenchContext for BenchContextImpl {
         assert!(self.stats.is_none());
 
         let tracing_loop = std::env::var("TRACING_LOOP").unwrap_or("WPEdgeSlot".to_string());
-        let trace_args = TraceArgs::parse_from([
-            "bench",
-            "--tracing-loop",
-            &tracing_loop,
-            "--iterations",
-            "1",
-        ]);
+        let trace_args = TraceArgs::parse_from(["bench", "--tracing-loop", &tracing_loop]);
         let args = crate::Args {
             paths: self.paths.clone(),
             object_model: ObjectModelChoice::OpenJDK,

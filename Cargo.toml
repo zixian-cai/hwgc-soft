@@ -135,6 +135,9 @@ name = "zxing"
 harness = false
 
 
+[package.metadata.harness.profiles.default]
+iterations = 1
+
 [package.metadata.harness.profiles.default.builds]
 edge_slot = { env = { TRACING_LOOP = "EdgeSlot" } }
 # dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" }, features = [
@@ -149,12 +152,18 @@ wp_edge_slot_relaxed = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
 ] }
 par_edge_slot = { env = { TRACING_LOOP = "ParEdgeSlot" }, features = [] }
 
+[package.metadata.harness.profiles.par]
+iterations = 1
+
 [package.metadata.harness.profiles.par.builds]
 wp_edge_slot = { env = { TRACING_LOOP = "WPEdgeSlot" } }
 wp_edge_slot_relaxed = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
     "relaxed_mark",
 ] }
 # dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" } }
+
+[package.metadata.harness.profiles.queue-scalability]
+iterations = 1
 
 [package.metadata.harness.profiles.queue-scalability.builds]
 cb001 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "1" } }
@@ -166,6 +175,8 @@ cb032 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "32" } }
 cb064 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "64" } }
 cb128 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "128" } }
 
+[package.metadata.harness.profiles.fwd]
+iterations = 1
 
 [package.metadata.harness.profiles.fwd.builds]
 wp = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = [
@@ -178,12 +189,17 @@ wp_s = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = [
     "no_space_dispatch",
 ] }
 
+[package.metadata.harness.profiles.async]
+iterations = 1
 
 [package.metadata.harness.profiles.async.builds]
 wp = { env = { TRACING_LOOP = "WPEdgeSlot" } }
 wp_async = { env = { TRACING_LOOP = "WPEdgeSlotAsync" } }
 # [package.metadata.harness.profiles.fwd.probes]
 # harness-probe-perf = { events = "PERF_COUNT_HW_CPU_CYCLES,PERF_COUNT_HW_INSTRUCTIONS,PERF_COUNT_HW_CACHE_L1D:MISS,PERF_COUNT_HW_CACHE_DTLB:MISS" }
+
+[package.metadata.harness.profiles.queue_order]
+iterations = 1
 
 [package.metadata.harness.profiles.queue_order.builds]
 wp_lifo = { env = { TRACING_LOOP = "WPEdgeSlot" } }
