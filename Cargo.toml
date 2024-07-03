@@ -113,6 +113,16 @@ wp_edge_slot_relaxed = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
 ] }
 # dist_edge_slot = { env = { TRACING_LOOP = "DistributedEdgeSlot" } }
 
+[package.metadata.harness.profiles.queue-scalability.builds]
+cb001 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "1" } }
+cb002 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "2" } }
+cb004 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "4" } }
+cb008 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "8" } }
+cb016 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "16" } }
+cb032 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "32" } }
+cb064 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "64" } }
+cb128 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "128" } }
+
 
 [package.metadata.harness.profiles.fwd.builds]
 wp = { env = { TRACING_LOOP = "WPEdgeSlot2" }, features = [

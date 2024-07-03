@@ -150,7 +150,7 @@ struct ParEdgeSlotTracer<O: ObjectModel> {
 
 impl<O: ObjectModel> Tracer<O> for ParEdgeSlotTracer<O> {
     fn startup(&self) {
-        info!("Use {} worker threads.", self.group.workers.len());
+        println!("Use {} worker threads.", self.group.workers.len());
         self.group.spawn();
     }
 
@@ -182,7 +182,10 @@ impl<O: ObjectModel> Tracer<O> for ParEdgeSlotTracer<O> {
 }
 
 impl<O: ObjectModel> ParEdgeSlotTracer<O> {
-    pub fn new(num_workers: usize) -> Self {
+    pub fn new(mut num_workers: usize) -> Self {
+        if let Ok(x) = std::env::var("THREADS") {
+            num_workers = x.parse().unwrap();
+        }
         Self {
             group: WorkerGroup::new(num_workers),
             _p: PhantomData,
