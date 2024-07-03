@@ -1,5 +1,6 @@
 #![feature(thread_local)]
 #![feature(test)]
+#![feature(lazy_cell)]
 #![feature(duration_millis_float)]
 
 extern crate test;
