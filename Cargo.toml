@@ -104,6 +104,7 @@ wp_edge_slot_relaxed = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
     "single_thread",
     "relaxed_mark",
 ] }
+par_edge_slot = { env = { TRACING_LOOP = "ParEdgeSlot" }, features = [] }
 
 [package.metadata.harness.profiles.par.builds]
 wp_edge_slot = { env = { TRACING_LOOP = "WPEdgeSlot" } }
