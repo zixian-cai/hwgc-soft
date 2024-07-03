@@ -1,7 +1,10 @@
+#![allow(stable_features)]
+#![allow(incomplete_features)]
 #![feature(thread_local)]
 #![feature(test)]
 #![feature(lazy_cell)]
 #![feature(duration_millis_float)]
+#![feature(adt_const_params)]
 
 extern crate test;
 

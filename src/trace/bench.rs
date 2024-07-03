@@ -1,5 +1,8 @@
 use std::{
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        MutexGuard,
+    },
     time::Instant,
 };
 
@@ -176,4 +179,36 @@ pub fn iter<O: ObjectModel>(
     let mark_sense = (iter % 2 == 0) as u8;
     let stats = tracer.trace(mark_sense, object_model);
     Ok(stats)
+}
+
+static CONTEXT: std::sync::Mutex<Option<Box<dyn BenchContext>>> = std::sync::Mutex::new(None);
+
+pub fn startup<const FILE: &'static str>() {
+    let tracing_loop = std::env::var("TRACING_LOOP").unwrap_or("WPEdgeSlot".to_string());
+    let context = prepare(ObjectModelChoice::OpenJDK, &tracing_loop, FILE).unwrap();
+    *CONTEXT.lock().unwrap() = Some(context);
+}
+
+pub fn teardown() {
+    let _context = CONTEXT.lock().unwrap().take().unwrap();
+}
+
+pub fn get_context() -> MutexGuard<'static, Option<Box<dyn BenchContext>>> {
+    CONTEXT.lock().unwrap()
+}
+
+#[macro_export]
+macro_rules! define_benchmark {
+    ($name:ident, $file:literal) => {
+        #[harness::bench(startup = hwgc_soft::bench::startup::<$file>, teardown = hwgc_soft::bench::teardown)]
+        fn $name(b: &harness::Bencher) {
+            let guard = hwgc_soft::bench::get_context();
+            let context = guard.as_ref().unwrap();
+            let mut stats = hwgc_soft::bench::TracingStats::default();
+            b.time(|| {
+                stats = context.iter();
+            });
+            context.finalize(b, stats);
+        }
+    };
 }
