@@ -165,7 +165,11 @@ fn verify_mark<O: ObjectModel>(mark_sense: u8, object_model: &mut O) {
     }
 }
 
-pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
+pub fn reified_trace<O: ObjectModel>(
+    mut object_model: O,
+    args: Args,
+    verbose: bool,
+) -> Result<(usize, f32, TracingStats)> {
     let trace_args = if let Some(Commands::Trace(a)) = args.command {
         a
     } else {
@@ -180,6 +184,11 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     let mut total_stats: TracingStats = Default::default();
 
     let mut shape_cache: ShapeLruCache<O> = ShapeLruCache::new(trace_args.shape_cache_size);
+
+    let tracer = create_tracer::<O>(&trace_args);
+    if let Some(tracer) = tracer.as_ref() {
+        tracer.startup();
+    }
 
     for path in &args.paths {
         // reset object model internal states
@@ -218,10 +227,6 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         #[cfg(feature = "zsim")]
         zsim_roi_begin();
         let iterations = trace_args.iterations;
-        let tracer = create_tracer::<O>(&trace_args);
-        if let Some(tracer) = tracer.as_ref() {
-            tracer.startup();
-        }
         for i in 0..iterations {
             mark_sense = (i % 2 == 0) as u8;
             let timed_stats = transitive_closure(
@@ -272,31 +277,34 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         zsim_roi_end();
         verify_mark(mark_sense, &mut object_model);
         heapdump.unmap_spaces()?;
-        if let Some(tracer) = tracer.as_ref() {
-            tracer.teardown();
-        }
     }
 
-    println!("============================ Tabulate Statistics ============================");
-    println!(
-        "pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends\t{}\ttotal_time_us\ttotal_busy_us\tutilization",
-        total_stats.shape_cache_stats.get_stats_header()
-    );
-    println!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-        pauses,
-        time,
-        total_stats.marked_objects,
-        total_stats.slots,
-        total_stats.non_empty_slots,
-        total_stats.sends,
-        total_stats.shape_cache_stats.get_stats_value(),
-        total_stats.total_run_time_us,
-        total_stats.total_busy_time_us,
-        total_stats.total_busy_time_us as f64 / total_stats.total_run_time_us as f64,
-    );
-    println!("-------------------------- End Tabulate Statistics --------------------------");
-    Ok(())
+    if let Some(tracer) = tracer.as_ref() {
+        tracer.teardown();
+    }
+
+    if verbose {
+        println!("============================ Tabulate Statistics ============================");
+        println!(
+            "pauses\ttime\tobjects\tslots\tnon_empty_slots\tsends\t{}\ttotal_time_us\ttotal_busy_us\tutilization",
+            total_stats.shape_cache_stats.get_stats_header()
+        );
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            pauses,
+            time,
+            total_stats.marked_objects,
+            total_stats.slots,
+            total_stats.non_empty_slots,
+            total_stats.sends,
+            total_stats.shape_cache_stats.get_stats_value(),
+            total_stats.total_run_time_us,
+            total_stats.total_busy_time_us,
+            total_stats.total_busy_time_us as f64 / total_stats.total_run_time_us as f64,
+        );
+        println!("-------------------------- End Tabulate Statistics --------------------------");
+    }
+    Ok((pauses as usize, time as f32 / 1000.0, total_stats))
 }
 
 pub mod bench;

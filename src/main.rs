@@ -22,7 +22,10 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
 
     if let Some(ref cmd) = args.command {
         match cmd {
-            Commands::Trace(_) => reified_trace(object_model, args),
+            Commands::Trace(_) => {
+                reified_trace(object_model, args, true)?;
+                Ok(())
+            }
             Commands::Analyze(_) => reified_analysis(object_model, args),
             Commands::Depth(_) => object_depth(object_model, args),
         }
