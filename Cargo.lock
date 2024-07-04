@@ -3078,6 +3078,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ws-deque"
+version = "0.1.0"
+
+[[package]]
 name = "xxhash-rust"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
