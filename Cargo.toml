@@ -41,12 +41,14 @@ tokio = { version = "1.36.0", features = ["full"] }
 futures = "0.3.30"
 ctor = "=0.2.7"
 spin = "0.9.8"
+ws-deque = { path = "ws-deque" }
 
 [build-dependencies]
 prost-build = { version = "0.11" }
 built = { version = "0.7.1", features = ["git2"] }
 
 [features]
+default = ["bulk_pop"]
 m5 = []
 zsim = []
 detailed_stats = []
@@ -57,6 +59,7 @@ no_space_dispatch = []
 atomic_free_farwarding = []
 fifo = []
 slower_root_scanning = []
+bulk_pop = []
 
 [profile.release]
 # lto = true
@@ -174,6 +177,20 @@ cb016 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "16" } }
 cb032 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "32" } }
 cb064 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "64" } }
 cb128 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "128" } }
+
+[package.metadata.harness.profiles.queue-scalability2]
+iterations = 1
+
+[package.metadata.harness.profiles.queue-scalability2.builds]
+cb001 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "1" } }
+cb002 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "2" } }
+cb004 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "4" } }
+cb008 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "8" } }
+cb016 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "16" } }
+cb032 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "32" } }
+cb064 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "64" } }
+cb128 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" } }
+cb128x = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "128" } }
 
 [package.metadata.harness.profiles.fwd]
 iterations = 1

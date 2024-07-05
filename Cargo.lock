@@ -1019,6 +1019,7 @@ dependencies = [
  "smallvec",
  "spin",
  "tokio",
+ "ws-deque",
  "zsim-hooks",
  "zstd 0.12.4",
 ]

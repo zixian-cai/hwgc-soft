@@ -1,6 +1,6 @@
-use crossbeam::deque::{Steal, Stealer, Worker};
 use crossbeam::queue::SegQueue;
 use once_cell::sync::Lazy;
+use ws_deque::{self, Stealer, Stolen, Worker};
 
 use super::TracingStats;
 use crate::util::tracer::Tracer;
@@ -52,6 +52,7 @@ pub static GLOBAL: Lazy<Arc<GlobalContext>> = Lazy::new(|| Arc::new(GlobalContex
 pub struct ParTracingWorker<O: ObjectModel> {
     id: usize,
     queue: Worker<Slot>,
+    stealer: Stealer<Slot>,
     global: Arc<GlobalContext>,
     group: Weak<WorkerGroup<Self>>,
     objs: u64,
@@ -64,9 +65,11 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
     type SharedWorker = Stealer<Slot>;
 
     fn new(id: usize, group: Weak<WorkerGroup<Self>>) -> Self {
+        let (worker, stealer) = ws_deque::new();
         Self {
             id,
-            queue: Worker::new_lifo(),
+            queue: worker,
+            stealer,
             group,
             global: GLOBAL.clone(),
             objs: 0,
@@ -77,7 +80,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
     }
 
     fn new_shared(&self) -> Self::SharedWorker {
-        self.queue.stealer()
+        self.stealer.clone()
     }
 
     fn run_epoch(&mut self) {
@@ -109,8 +112,16 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
         };
         'outer: loop {
             // Drain local queue
-            while let Some(slot) = self.queue.pop() {
-                process_slot(slot);
+            if cfg!(feature = "bulk_pop") {
+                while let Some(slots) = self.queue.pop_bulk::<64>() {
+                    for s in slots {
+                        process_slot(s);
+                    }
+                }
+            } else {
+                while let Some(slot) = self.queue.pop() {
+                    process_slot(slot);
+                }
             }
             // Steal from other workers
             let mut retry = false;
@@ -118,12 +129,12 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
                 if i == self.id {
                     continue;
                 }
-                match stealer.steal_batch_and_pop(&self.queue) {
-                    Steal::Success(slot) => {
+                match stealer.steal() {
+                    Stolen::Data(slot) => {
                         process_slot(slot);
                         continue 'outer;
                     }
-                    Steal::Retry => {
+                    Stolen::Abort => {
                         retry = true;
                         continue;
                     }
@@ -135,7 +146,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
             }
             break;
         }
-        assert!(self.queue.is_empty());
+        // assert!(self.queue.is_empty());
         let global = &self.global;
         global.objs.fetch_add(self.objs, Ordering::SeqCst);
         global.edges.fetch_add(self.slots, Ordering::SeqCst);
@@ -150,7 +161,7 @@ struct ParEdgeSlotTracer<O: ObjectModel> {
 
 impl<O: ObjectModel> Tracer<O> for ParEdgeSlotTracer<O> {
     fn startup(&self) {
-        info!("Use {} worker threads.", self.group.workers.len());
+        println!("Use {} worker threads.", self.group.workers.len());
         self.group.spawn();
     }
 
@@ -182,7 +193,10 @@ impl<O: ObjectModel> Tracer<O> for ParEdgeSlotTracer<O> {
 }
 
 impl<O: ObjectModel> ParEdgeSlotTracer<O> {
-    pub fn new(num_workers: usize) -> Self {
+    pub fn new(mut num_workers: usize) -> Self {
+        if let Ok(x) = std::env::var("THREADS") {
+            num_workers = x.parse().unwrap();
+        }
         Self {
             group: WorkerGroup::new(num_workers),
             _p: PhantomData,

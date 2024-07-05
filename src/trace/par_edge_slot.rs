@@ -109,7 +109,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
         };
         'outer: loop {
             // Drain local queue
-            while let Some(slot) = self.queue.pop() {
+            while let Some(slot) = self.queue.p() {
                 process_slot(slot);
             }
             // Steal from other workers

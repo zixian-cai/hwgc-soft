@@ -148,10 +148,10 @@ impl GlobalContext {
     }
 
     pub fn get_stats(&self) -> TracingStats {
-        println!(
-            "total_busy_us {}",
-            self.total_busy_us.load(Ordering::SeqCst)
-        );
+        // println!(
+        //     "total_busy_us {}",
+        //     self.total_busy_us.load(Ordering::SeqCst)
+        // );
         TracingStats {
             marked_objects: self.objs.load(Ordering::SeqCst),
             slots: self.edges.load(Ordering::SeqCst),
