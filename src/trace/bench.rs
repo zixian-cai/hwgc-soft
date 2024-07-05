@@ -54,6 +54,11 @@ impl BenchContext for BenchContextImpl {
         b.add_stat("marked_objects", stats.tracing_stats.marked_objects);
         b.add_stat("slots", stats.tracing_stats.slots);
         b.add_stat("non_empty_slots", stats.tracing_stats.non_empty_slots);
+        if let Ok(x) = std::env::var("THREADS") {
+            if let Ok(x) = x.parse::<usize>() {
+                b.add_stat("threads", x);
+            }
+        }
     }
 }
 

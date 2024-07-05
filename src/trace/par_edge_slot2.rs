@@ -164,7 +164,10 @@ struct ParEdgeSlotTracer<O: ObjectModel> {
 
 impl<O: ObjectModel> Tracer<O> for ParEdgeSlotTracer<O> {
     fn startup(&self) {
-        println!("Use {} worker threads.", self.group.workers.len());
+        println!(
+            "[ParEdgeSlot2] Use {} worker threads.",
+            self.group.workers.len()
+        );
         self.group.spawn();
     }
 
