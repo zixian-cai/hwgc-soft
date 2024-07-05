@@ -184,8 +184,12 @@ impl<T: Send + Copy> Worker<T> {
         unsafe { self.deque.pop() }
     }
     #[inline(always)]
-    pub fn pop_bulk<const N: usize>(&self) -> Option<[T; N]> {
-        assert!(!self.enable_overflow);
+    pub fn pop_bulk<const N: usize>(&mut self) -> Option<([MaybeUninit<T>; N], usize)> {
+        if self.enable_overflow {
+            if let Some((buf, n)) = self.overflow.pop_bulk::<N>() {
+                return Some((buf, n));
+            }
+        }
         unsafe { self.deque.pop_bulk() }
     }
 }
@@ -232,7 +236,7 @@ impl<T: Send> Deque<T> {
     }
 
     #[inline(always)]
-    unsafe fn pop_bulk<const N: usize>(&self) -> Option<[T; N]> {
+    unsafe fn pop_bulk<const N: usize>(&self) -> Option<([MaybeUninit<T>; N], usize)> {
         let n = N as isize;
         let b = self.bottom.load(Relaxed);
 
@@ -244,7 +248,8 @@ impl<T: Send> Deque<T> {
         }
 
         // Make sure bottom is stored before top is read.
-        let b = b.wrapping_sub(n);
+        let m = isize::min(b.wrapping_sub(t), n);
+        let b = b.wrapping_sub(m);
         self.bottom.store(b, Relaxed);
         mfence();
         let t = self.top.load(Relaxed);
@@ -252,36 +257,31 @@ impl<T: Send> Deque<T> {
         // If the deque is empty, restore bottom and exit.
         let size = b.wrapping_sub(t);
         if size < 0 {
-            self.bottom.store(b.wrapping_add(n), Relaxed);
+            self.bottom.store(b.wrapping_add(m), Relaxed);
             return None;
         }
 
         // Fetch the element from the queue.
         let a = self.array.load(Relaxed);
-        let mut data: MaybeUninit<[T; N]> = MaybeUninit::uninit();
-        for i in 0..n {
+        let mut data: [MaybeUninit<T>; N] = [const { MaybeUninit::uninit() }; N];
+        for i in 0..m {
             let e = (*a).get(b.wrapping_add(i));
-            unsafe {
-                let slice = data.as_mut_ptr();
-                let entry = (*slice).as_mut_ptr().add(i as usize);
-                entry.write(e);
-            }
+            data[i as usize].write(e);
         }
-        let data = unsafe { data.assume_init() };
 
         // If this was the last element in the queue, check for races.
         if size != 0 {
-            return Some(data);
+            return Some((data, m as usize));
         }
         if self
             .top
-            .compare_exchange(t, t.wrapping_add(n), SeqCst, SeqCst)
+            .compare_exchange(t, t.wrapping_add(m), SeqCst, SeqCst)
             .is_ok()
         {
-            self.bottom.store(t.wrapping_add(1), Relaxed);
-            return Some(data);
+            self.bottom.store(t.wrapping_add(m), Relaxed);
+            return Some((data, m as usize));
         } else {
-            self.bottom.store(t.wrapping_add(1), Relaxed);
+            self.bottom.store(t.wrapping_add(m), Relaxed);
             forget(data); // Someone else stole this value
             return None;
         }

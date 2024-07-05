@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 pub struct Stack<T> {
     data: Vec<Vec<T>>,
     cache: Option<Vec<T>>,
@@ -43,6 +45,24 @@ impl<T> Stack<T> {
             self.cache = buf;
         }
         item
+    }
+
+    #[inline(always)]
+    pub fn pop_bulk<const N: usize>(&mut self) -> Option<([MaybeUninit<T>; N], usize)> {
+        if self.data.is_empty() {
+            return None;
+        }
+        let mut buf = [const { MaybeUninit::uninit() }; N];
+        let mut i = 0;
+        while i < N {
+            if let Some(item) = self.pop() {
+                buf[i] = MaybeUninit::new(item);
+                i += 1;
+            } else {
+                break;
+            }
+        }
+        Some((buf, i))
     }
 
     #[inline(always)]

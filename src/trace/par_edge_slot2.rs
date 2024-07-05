@@ -115,8 +115,9 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
         'outer: loop {
             // Drain local queue
             if cfg!(feature = "deque_bulk_pop") {
-                while let Some(slots) = self.queue.pop_bulk::<64>() {
-                    for s in slots {
+                while let Some((slots, n)) = self.queue.pop_bulk::<64>() {
+                    for i in 0..n {
+                        let s = unsafe { slots[i].assume_init() };
                         process_slot!(s);
                     }
                 }

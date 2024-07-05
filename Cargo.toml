@@ -48,7 +48,7 @@ prost-build = { version = "0.11" }
 built = { version = "0.7.1", features = ["git2"] }
 
 [features]
-default = ["deque_fast_fence", "deque_overflow"]
+default = []
 m5 = []
 zsim = []
 detailed_stats = []
