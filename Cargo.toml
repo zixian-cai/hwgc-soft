@@ -48,7 +48,7 @@ prost-build = { version = "0.11" }
 built = { version = "0.7.1", features = ["git2"] }
 
 [features]
-default = ["bulk_pop"]
+default = ["deque_fast_fence", "deque_overflow"]
 m5 = []
 zsim = []
 detailed_stats = []
@@ -59,7 +59,9 @@ no_space_dispatch = []
 atomic_free_farwarding = []
 fifo = []
 slower_root_scanning = []
-bulk_pop = []
+deque_bulk_pop = []
+deque_fast_fence = ["ws-deque/fast_fence"]
+deque_overflow = []
 
 [profile.release]
 # lto = true

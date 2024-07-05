@@ -39,6 +39,10 @@
 //!     let stealer2 = stealer.clone();
 //!     stealer2.steal();
 
+mod stack;
+
+use stack::Stack;
+
 pub use self::Stolen::*;
 
 use std::arch::asm;
@@ -70,6 +74,7 @@ struct Deque<T: Send> {
     bottom: AtomicIsize,
     top: AtomicIsize,
     array: AtomicPtr<Buffer<T>>,
+    growable: bool,
 }
 
 /// Worker half of the work-stealing deque. This worker has exclusive access to
@@ -78,6 +83,8 @@ struct Deque<T: Send> {
 /// There may only be one worker per deque.
 pub struct Worker<T: Send> {
     deque: Arc<Deque<T>>,
+    overflow: Stack<T>,
+    enable_overflow: bool,
 
     // Marker so that the Worker is Send but not Sync. The worker can only be
     // accessed from a single thread at once. Ideally we would use a negative
@@ -139,32 +146,46 @@ struct Buffer<T: Send> {
 }
 
 /// Allocates a new work-stealing deque.
-pub fn new<T: Send>() -> (Worker<T>, Stealer<T>) {
-    let a = Arc::new(Deque::new());
+pub fn new<T: Send>(overflow: bool) -> (Worker<T>, Stealer<T>) {
+    let a = Arc::new(Deque::new(!overflow));
     let b = a.clone();
     (
         Worker {
             deque: a,
+            overflow: Stack::new(),
+            enable_overflow: overflow,
             marker: PhantomData,
         },
         Stealer { deque: b },
     )
 }
 
-impl<T: Send> Worker<T> {
+impl<T: Send + Copy> Worker<T> {
     /// Pushes data onto the front of this work queue.
     #[inline(always)]
-    pub fn push(&self, t: T) {
-        unsafe { self.deque.push(t) }
+    pub fn push(&mut self, t: T) {
+        if !unsafe { self.deque.push(t) } {
+            if self.enable_overflow {
+                self.overflow.push(t);
+            } else {
+                unreachable!()
+            }
+        }
     }
     /// Pops data off the front of the work queue, returning `None` on an empty
     /// queue.
     #[inline(always)]
-    pub fn pop(&self) -> Option<T> {
+    pub fn pop(&mut self) -> Option<T> {
+        if self.enable_overflow {
+            if let Some(t) = self.overflow.pop() {
+                return Some(t);
+            }
+        }
         unsafe { self.deque.pop() }
     }
     #[inline(always)]
     pub fn pop_bulk<const N: usize>(&self) -> Option<[T; N]> {
+        assert!(!self.enable_overflow);
         unsafe { self.deque.pop_bulk() }
     }
 }
@@ -178,17 +199,18 @@ impl<T: Send> Stealer<T> {
 }
 
 impl<T: Send> Deque<T> {
-    fn new() -> Deque<T> {
-        let buf = Box::new(unsafe { Buffer::new(MIN_SIZE) });
+    fn new(growable: bool) -> Deque<T> {
+        let buf = Box::new(unsafe { Buffer::new(if growable { 1 << 17 } else { MIN_SIZE }) });
         Deque {
             bottom: AtomicIsize::new(0),
             top: AtomicIsize::new(0),
             array: AtomicPtr::new(Box::into_raw(buf)),
+            growable,
         }
     }
 
     #[inline(always)]
-    unsafe fn push(&self, data: T) {
+    unsafe fn push(&self, data: T) -> bool {
         let b = self.bottom.load(Relaxed);
         let t = self.top.load(Acquire);
         let mut a = self.array.load(Relaxed);
@@ -196,6 +218,9 @@ impl<T: Send> Deque<T> {
         // Grow the buffer if it is full.
         let size = b.wrapping_sub(t);
         if size == (*a).size() {
+            if !self.growable {
+                return false;
+            }
             a = Box::into_raw(Box::from_raw(a).grow(b, t));
             self.array.store(a, Release);
         }
@@ -203,6 +228,7 @@ impl<T: Send> Deque<T> {
         (*a).put(b, data);
         fence(Release);
         self.bottom.store(b.wrapping_add(1), Relaxed);
+        true
     }
 
     #[inline(always)]

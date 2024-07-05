@@ -65,7 +65,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
     type SharedWorker = Stealer<Slot>;
 
     fn new(id: usize, group: Weak<WorkerGroup<Self>>) -> Self {
-        let (worker, stealer) = ws_deque::new();
+        let (worker, stealer) = ws_deque::new(cfg!(feature = "deque_overflow"));
         Self {
             id,
             queue: worker,
@@ -99,28 +99,30 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
             }
         }
         // trace objects
-        let mut process_slot = |slot: Slot| {
-            self.slots += 1;
-            if let Some(o) = slot.load() {
-                if o.mark(mark_state) {
-                    self.objs += 1;
-                    o.scan::<O, _>(|s| self.queue.push(s));
+        macro_rules! process_slot {
+            ($slot: expr) => {{
+                self.slots += 1;
+                if let Some(o) = $slot.load() {
+                    if o.mark(mark_state) {
+                        self.objs += 1;
+                        o.scan::<O, _>(|s| self.queue.push(s));
+                    }
+                } else {
+                    self.ne_slots += 1;
                 }
-            } else {
-                self.ne_slots += 1;
-            }
-        };
+            }};
+        }
         'outer: loop {
             // Drain local queue
-            if cfg!(feature = "bulk_pop") {
+            if cfg!(feature = "deque_bulk_pop") {
                 while let Some(slots) = self.queue.pop_bulk::<64>() {
                     for s in slots {
-                        process_slot(s);
+                        process_slot!(s);
                     }
                 }
             } else {
                 while let Some(slot) = self.queue.pop() {
-                    process_slot(slot);
+                    process_slot!(slot);
                 }
             }
             // Steal from other workers
@@ -131,7 +133,7 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
                 }
                 match stealer.steal() {
                     Stolen::Data(slot) => {
-                        process_slot(slot);
+                        process_slot!(slot);
                         continue 'outer;
                     }
                     Stolen::Abort => {
