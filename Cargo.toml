@@ -184,15 +184,29 @@ cb128 = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "128" } }
 iterations = 1
 
 [package.metadata.harness.profiles.queue-scalability2.builds]
-cb001 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "1" } }
-cb002 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "2" } }
-cb004 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "4" } }
-cb008 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "8" } }
-cb016 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "16" } }
-cb032 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "32" } }
-cb064 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "64" } }
-cb128 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" } }
-cb128x = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "128" } }
+# cb001 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "1" } }
+# cb002 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "2" } }
+t004 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "4" } }
+t008 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "8" } }
+t016 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "16" } }
+t032 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "32" } }
+t064 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "64" } }
+t128 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" } }
+t128_wp = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "128" } }
+t128_crossbeam = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "128" } }
+t128_bulk = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+    "deque_bulk_pop",
+] }
+t128_fast_fence = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+    "deque_fast_fence",
+] }
+t128_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+    "deque_overflow",
+] }
+t128_bulk_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+    "deque_overflow",
+    "deque_bulk_pop",
+] }
 
 [package.metadata.harness.profiles.fwd]
 iterations = 1
