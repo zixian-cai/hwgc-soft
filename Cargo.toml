@@ -186,27 +186,44 @@ iterations = 1
 [package.metadata.harness.profiles.queue-scalability2.builds]
 # cb001 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "1" } }
 # cb002 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "2" } }
-t004 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "4" } }
-t008 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "8" } }
+# t004 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "4" } }
+# t008 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "8" } }
+t016_crossbeam = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "16" } }
 t016 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "16" } }
+t016_wp = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "16" } }
+t016_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "16" }, features = [
+    "deque_overflow",
+] }
+
+t032_crossbeam = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "32" } }
 t032 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "32" } }
+t032_wp = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "32" } }
+t032_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "32" }, features = [
+    "deque_overflow",
+] }
+
+t064_crossbeam = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "64" } }
 t064 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "64" } }
-t128 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" } }
-t128_wp = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "128" } }
-t128_crossbeam = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "128" } }
-t128_bulk = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
-    "deque_bulk_pop",
-] }
-t128_fast_fence = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
-    "deque_fast_fence",
-] }
-t128_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+t064_wp = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "64" } }
+t064_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "64" }, features = [
     "deque_overflow",
 ] }
-t128_bulk_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
-    "deque_overflow",
-    "deque_bulk_pop",
-] }
+
+
+# t128_crossbeam = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "128" } }
+# t128_bulk = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+#     "deque_bulk_pop",
+# ] }
+# t128_fast_fence = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+#     "deque_fast_fence",
+# ] }
+# t128_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+#     "deque_overflow",
+# ] }
+# t128_bulk_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "128" }, features = [
+#     "deque_overflow",
+#     "deque_bulk_pop",
+# ] }
 
 [package.metadata.harness.profiles.fwd]
 iterations = 1
