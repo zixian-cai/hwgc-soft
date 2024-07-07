@@ -4,11 +4,12 @@ use crate::util::side_mark_table::SideMarkTable;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::{Object, Slot};
 use crate::util::workers::WorkerGroup;
-use crate::util::wp::{Packet, WPWorker, GLOBAL};
+use crate::util::wp2::{self as wp, Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
 use std::arch::asm;
 use std::ops::Range;
-use std::sync::LazyLock;
+use std::ptr::addr_of_mut;
+use std::sync::{LazyLock, Once};
 use std::{
     marker::PhantomData,
     sync::{atomic::Ordering, Arc},
@@ -28,10 +29,48 @@ impl Packet for MarkTableZeroingPacket {
     }
 }
 
+impl wp::GetBucket for MarkTableZeroingPacket {
+    unsafe fn get_mut() -> &'static mut wp::Bucket {
+        static mut BUCKET: wp::Bucket = wp::Bucket::new("MarkTableZeroingPacket");
+        &mut *addr_of_mut!(BUCKET)
+    }
+    fn get() -> &'static wp::Bucket {
+        unsafe { Self::get_mut() }
+    }
+}
+
+define_bucket!(MarkTableZeroingPacket);
+// dep!(FakeMarkTableZeroingPacket => TracePacket);
+
+fn init_dep_zeroing_trace<O: ObjectModel>() {
+    let a = unsafe { <MarkTableZeroingPacket as wp::GetBucket>::get_mut() };
+    let b = <TracePacket<O> as wp::GetBucket>::get();
+    a.successors.push(b);
+    let b = unsafe { <TracePacket<O> as wp::GetBucket>::get_mut() };
+    b.predecessors.push(a);
+}
+
+// #[ctor::ctor]
+// fn dep_zeroing_trace() {
+//     let a = <FakeMarkTableZeroingPacket as wp::GetBucket>::get();
+//     let b = <$b as wp::GetBucket>::get();
+//     a.preds.push(b);
+// }
+
 struct TracePacket<O: ObjectModel> {
     slots: Vec<Slot>,
     next_slots: Vec<Slot>,
     _p: PhantomData<O>,
+}
+
+impl<O: ObjectModel> wp::GetBucket for TracePacket<O> {
+    unsafe fn get_mut() -> &'static mut wp::Bucket {
+        static mut BUCKET: wp::Bucket = wp::Bucket::new("TracePacket");
+        &mut *addr_of_mut!(BUCKET)
+    }
+    fn get() -> &'static wp::Bucket {
+        unsafe { Self::get_mut() }
+    }
 }
 
 impl<O: ObjectModel> TracePacket<O> {
@@ -46,7 +85,7 @@ impl<O: ObjectModel> TracePacket<O> {
     fn flush(&mut self, local: &mut WPWorker) {
         if !self.next_slots.is_empty() {
             let next = TracePacket::<O>::new(std::mem::take(&mut self.next_slots));
-            local.spawn(1, next);
+            local.spawn(next);
         }
     }
 
@@ -155,6 +194,16 @@ impl<O: ObjectModel> ScanRoots<O> {
     }
 }
 
+impl<O: ObjectModel> wp::GetBucket for ScanRoots<O> {
+    unsafe fn get_mut() -> &'static mut wp::Bucket {
+        static mut BUCKET: wp::Bucket = wp::Bucket::new("ScanRoots");
+        &mut *addr_of_mut!(BUCKET)
+    }
+    fn get() -> &'static wp::Bucket {
+        unsafe { Self::get_mut() }
+    }
+}
+
 impl<O: ObjectModel> Packet for ScanRoots<O> {
     fn run(&mut self) {
         let local = WPWorker::current();
@@ -183,13 +232,13 @@ impl<O: ObjectModel> Packet for ScanRoots<O> {
             buf.push(slot);
             if buf.len() >= capacity {
                 let packet = TracePacket::<O>::new(buf);
-                local.spawn(1, packet);
+                local.spawn(packet);
                 buf = vec![];
             }
         }
         if !buf.is_empty() {
             let packet = TracePacket::<O>::new(buf);
-            local.spawn(1, packet);
+            local.spawn(packet);
         }
     }
 }
@@ -201,11 +250,12 @@ struct WPEdgeSlotTracer<O: ObjectModel> {
 
 impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
     fn startup(&self) {
-        println!(
-            "[WPEdgeSlot2] Use {} worker threads.",
-            self.group.workers.len()
-        );
+        info!("Use {} worker threads.", self.group.workers.len());
         self.group.spawn();
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            init_dep_zeroing_trace::<O>();
+        });
     }
 
     fn trace(&self, mark_sense: u8, object_model: &O) -> TracingStats {
@@ -218,7 +268,7 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         for i in (0..entries).step_by(chunk_size) {
             let range = i..(i + chunk_size).min(entries);
             let packet = MarkTableZeroingPacket { range };
-            GLOBAL.buckets.prepare.push(Box::new(packet));
+            wp::spawn(packet);
         }
         // Create initial root scanning packets
         let roots = object_model.roots();
@@ -228,11 +278,17 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         for id in 0..num_workers {
             let range = (roots_len * id) / num_workers..(roots_len * (id + 1)) / num_workers;
             let packet = ScanRoots::<O>::new(range);
-            GLOBAL.buckets.prepare.push(Box::new(packet));
+            wp::spawn(packet);
         }
-        GLOBAL.buckets.prepare.open();
+        // Open buckets
+        wp::open::<MarkTableZeroingPacket>();
+        wp::open::<ScanRoots<O>>();
         // Wake up workers
         self.group.run_epoch();
+        // Close buckets
+        wp::close::<MarkTableZeroingPacket>();
+        wp::close::<ScanRoots<O>>();
+        wp::close::<TracePacket<O>>();
         GLOBAL.get_stats()
     }
 
@@ -242,10 +298,7 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
 }
 
 impl<O: ObjectModel> WPEdgeSlotTracer<O> {
-    pub fn new(mut num_workers: usize) -> Self {
-        if let Ok(x) = std::env::var("THREADS") {
-            num_workers = x.parse().unwrap();
-        }
+    pub fn new(num_workers: usize) -> Self {
         Self {
             group: WorkerGroup::new(num_workers),
             _p: PhantomData,

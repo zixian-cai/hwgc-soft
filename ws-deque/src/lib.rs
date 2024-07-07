@@ -160,11 +160,11 @@ pub fn new<T: Send>(overflow: bool) -> (Worker<T>, Stealer<T>) {
     )
 }
 
-impl<T: Send + Copy> Worker<T> {
+impl<T: Send> Worker<T> {
     /// Pushes data onto the front of this work queue.
     #[inline(always)]
     pub fn push(&mut self, t: T) {
-        if !unsafe { self.deque.push(t) } {
+        if let Err(t) = unsafe { self.deque.push(t) } {
             if self.enable_overflow {
                 self.overflow.push(t);
             } else {
@@ -214,7 +214,7 @@ impl<T: Send> Deque<T> {
     }
 
     #[inline(always)]
-    unsafe fn push(&self, data: T) -> bool {
+    unsafe fn push(&self, data: T) -> Result<(), T> {
         let b = self.bottom.load(Relaxed);
         let t = self.top.load(Acquire);
         let mut a = self.array.load(Relaxed);
@@ -223,7 +223,7 @@ impl<T: Send> Deque<T> {
         let size = b.wrapping_sub(t);
         if size == (*a).size() {
             if !self.growable {
-                return false;
+                return Err(data);
             }
             a = Box::into_raw(Box::from_raw(a).grow(b, t));
             self.array.store(a, Release);
@@ -232,7 +232,7 @@ impl<T: Send> Deque<T> {
         (*a).put(b, data);
         fence(Release);
         self.bottom.store(b.wrapping_add(1), Relaxed);
-        true
+        Ok(())
     }
 
     #[inline(always)]
