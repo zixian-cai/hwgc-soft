@@ -2,19 +2,21 @@ use std::mem::MaybeUninit;
 
 pub struct Stack<T> {
     data: Vec<Vec<T>>,
-    cache: Option<Vec<T>>,
+    cache: Vec<Vec<T>>,
+    max_cache: usize,
 }
 
 impl<T> Stack<T> {
     pub fn new() -> Self {
         Self {
             data: Vec::new(),
-            cache: None,
+            cache: Vec::new(),
+            max_cache: 4,
         }
     }
 
     fn alloc(&mut self) -> Vec<T> {
-        if let Some(cache) = self.cache.take() {
+        if let Some(cache) = self.cache.pop() {
             cache
         } else {
             Vec::with_capacity(Self::segment_size())
@@ -42,7 +44,11 @@ impl<T> Stack<T> {
         let item = self.data.last_mut().unwrap().pop();
         if self.data.last().unwrap().is_empty() {
             let buf = self.data.pop();
-            self.cache = buf;
+            if self.cache.len() < self.max_cache {
+                self.cache.push(buf.unwrap());
+            } else {
+                drop(buf);
+            }
         }
         item
     }

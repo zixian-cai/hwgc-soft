@@ -97,12 +97,14 @@ pub struct Worker<T: Send> {
 /// `steal` method.
 pub struct Stealer<T: Send> {
     deque: Arc<Deque<T>>,
+    _padding: [u8; 256],
 }
 
 impl<T: Send> Clone for Stealer<T> {
     fn clone(&self) -> Self {
         Stealer {
             deque: self.deque.clone(),
+            _padding: [0u8; 256],
         }
     }
 }
@@ -156,7 +158,10 @@ pub fn new<T: Send>(overflow: bool) -> (Worker<T>, Stealer<T>) {
             enable_overflow: overflow,
             marker: PhantomData,
         },
-        Stealer { deque: b },
+        Stealer {
+            deque: b,
+            _padding: [0u8; 256],
+        },
     )
 }
 
@@ -184,6 +189,15 @@ impl<T: Send> Worker<T> {
         unsafe { self.deque.pop() }
     }
     #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        if !self.overflow.is_empty() {
+            return false;
+        }
+        let b = self.deque.bottom.load(Relaxed);
+        let t = self.deque.top.load(Relaxed);
+        b.wrapping_sub(t) <= 0
+    }
+    #[inline(always)]
     pub fn pop_bulk<const N: usize>(&mut self) -> Option<([MaybeUninit<T>; N], usize)> {
         if self.enable_overflow {
             if let Some((buf, n)) = self.overflow.pop_bulk::<N>() {
@@ -200,11 +214,18 @@ impl<T: Send> Stealer<T> {
     pub fn steal(&self) -> Stolen<T> {
         unsafe { self.deque.steal() }
     }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        let b = self.deque.bottom.load(Relaxed);
+        let t = self.deque.top.load(Relaxed);
+        b.wrapping_sub(t) <= 0
+    }
 }
 
 impl<T: Send> Deque<T> {
     fn new(growable: bool) -> Deque<T> {
-        let buf = Box::new(unsafe { Buffer::new(if growable { 1 << 17 } else { MIN_SIZE }) });
+        let buf = Box::new(unsafe { Buffer::new(MIN_SIZE) });
         Deque {
             bottom: AtomicIsize::new(0),
             top: AtomicIsize::new(0),
@@ -337,7 +358,7 @@ impl<T: Send> Deque<T> {
     unsafe fn steal(&self) -> Stolen<T> {
         // Make sure top is read before bottom.
         let t = self.top.load(Acquire);
-        fence(SeqCst);
+        mfence();
         let b = self.bottom.load(Acquire);
 
         // Exit if the queue is empty.

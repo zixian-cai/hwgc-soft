@@ -3,7 +3,7 @@ use crate::util::fake_forwarding::TO_SPACE;
 use crate::util::side_mark_table::SideMarkTable;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::{Object, Slot};
-use crate::util::workers::WorkerGroup;
+use crate::util::workers::{end_epoch, start_epoch, WorkerGroup};
 use crate::util::wp::{Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
 use std::arch::asm;
@@ -232,7 +232,9 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         }
         GLOBAL.buckets.prepare.open();
         // Wake up workers
+        start_epoch();
         self.group.run_epoch();
+        end_epoch();
         GLOBAL.get_stats()
     }
 

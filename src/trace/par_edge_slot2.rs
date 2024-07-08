@@ -6,10 +6,12 @@ use super::TracingStats;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::Slot;
 use crate::util::workers::WorkerGroup;
+use crate::util::workers::{end_epoch, start_epoch, thread_done};
 use crate::{ObjectModel, TraceArgs};
 use std::ops::Range;
-use std::sync::atomic::{AtomicU64, AtomicU8};
+use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize};
 use std::sync::Weak;
+use std::time::Duration;
 use std::{
     marker::PhantomData,
     sync::{atomic::Ordering, Arc},
@@ -59,6 +61,62 @@ pub struct ParTracingWorker<O: ObjectModel> {
     slots: u64,
     ne_slots: u64,
     _p: PhantomData<O>,
+}
+
+static TERMINATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+impl<O: ObjectModel> ParTracingWorker<O> {
+    #[inline(always)]
+    fn peek(&self, group: &WorkerGroup<Self>) -> bool {
+        for w in group.workers.iter() {
+            if !w.is_empty() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn offer_termination(&self, group: &WorkerGroup<Self>) -> bool {
+        TERMINATION_COUNT.fetch_add(1, Ordering::SeqCst);
+        const HARD_SPINS: usize = 4096;
+        const YIELDS_BEFORE_SLEEP: usize = 5000;
+        const SPIN_TO_YIELD_RATIO: usize = 10;
+
+        let mut yield_count = 0usize;
+        let mut hard_spin_count = 0usize;
+        let mut hard_spin_limit = (HARD_SPINS >> SPIN_TO_YIELD_RATIO).max(1);
+
+        let hard_spin_start = hard_spin_limit;
+
+        let num_workers = group.workers.len();
+
+        loop {
+            if TERMINATION_COUNT.load(Ordering::Relaxed) == num_workers {
+                return true;
+            }
+            if yield_count <= YIELDS_BEFORE_SLEEP {
+                yield_count += 1;
+                if hard_spin_count > SPIN_TO_YIELD_RATIO {
+                    std::thread::yield_now();
+                    hard_spin_count = 0;
+                    hard_spin_limit = hard_spin_start;
+                } else {
+                    hard_spin_limit = usize::max(2 * hard_spin_limit, HARD_SPINS);
+                    for _ in 0..hard_spin_limit {
+                        unsafe { std::arch::asm!("nop") }
+                    }
+                    hard_spin_count += 1;
+                }
+            } else {
+                yield_count = 0;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if self.peek(group) {
+                TERMINATION_COUNT.fetch_sub(1, Ordering::SeqCst);
+                return false;
+            }
+        }
+    }
 }
 
 impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
@@ -147,8 +205,12 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
             if retry {
                 continue;
             }
-            break;
+            // Termination check
+            if self.queue.is_empty() && self.offer_termination(&group) {
+                break;
+            }
         }
+        thread_done();
         // assert!(self.queue.is_empty());
         let global = &self.global;
         global.objs.fetch_add(self.objs, Ordering::SeqCst);
@@ -184,7 +246,10 @@ impl<O: ObjectModel> Tracer<O> for ParEdgeSlotTracer<O> {
             GLOBAL.root_segments.push(range);
         }
         // Wake up workers
+        TERMINATION_COUNT.store(0, Ordering::SeqCst);
+        start_epoch();
         self.group.run_epoch();
+        end_epoch();
         TracingStats {
             marked_objects: GLOBAL.objs.load(Ordering::SeqCst),
             slots: GLOBAL.edges.load(Ordering::SeqCst),

@@ -321,6 +321,8 @@ impl crate::util::workers::Worker for WPWorker {
             GLOBAL.yielded.fetch_sub(1, Ordering::SeqCst);
         }
 
+        super::workers::thread_done();
+
         // println!("Worker #{} exit", self._id);
         // println!("[{:.3}ms] Worker #{} exit", GLOBAL.elapsed(), self._id);
         let elapsed = t.elapsed();
