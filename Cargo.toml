@@ -198,6 +198,9 @@ t016_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "16" }, f
 t032_crossbeam = { env = { TRACING_LOOP = "ParEdgeSlot", THREADS = "32" } }
 t032 = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "32" } }
 t032_wp = { env = { TRACING_LOOP = "WPEdgeSlot", THREADS = "32" } }
+t032_wp2 = { env = { TRACING_LOOP = "WPEdgeSlot2", THREADS = "32" }, features = [
+    "deque_overflow",
+] }
 t032_overflow_opt = { env = { TRACING_LOOP = "ParEdgeSlot2", THREADS = "32" }, features = [
     "deque_overflow",
 ] }

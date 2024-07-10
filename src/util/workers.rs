@@ -139,7 +139,7 @@ pub trait Worker: Send + 'static + Sized {
     fn run_epoch(&mut self);
 }
 
-const YIELD_TIMER: bool = true;
+const YIELD_TIMER: bool = false;
 static mut NOW: Option<std::time::Instant> = None;
 static YIELD: SegQueue<f32> = SegQueue::new();
 

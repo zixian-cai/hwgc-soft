@@ -24,7 +24,6 @@ pub struct Buckets {
 }
 
 pub struct Bucket {
-    count: AtomicUsize,
     pub name: &'static str,
     is_open: AtomicBool,
     queue: crossbeam::queue::SegQueue<Box<dyn Packet>>,
@@ -34,7 +33,6 @@ impl Bucket {
     pub const fn new(name: &'static str) -> Self {
         Self {
             name,
-            count: AtomicUsize::new(0),
             is_open: AtomicBool::new(false),
             queue: crossbeam::queue::SegQueue::new(),
         }
@@ -56,11 +54,10 @@ impl Bucket {
     }
 
     pub fn is_open(&self) -> bool {
-        self.is_open.load(Ordering::SeqCst)
+        self.is_open.load(Ordering::Relaxed)
     }
 
     pub fn push(&self, packet: Box<dyn Packet>) {
-        self.count.fetch_add(1, Ordering::SeqCst);
         self.queue.push(packet);
     }
 }
@@ -181,6 +178,7 @@ pub struct WPWorker {
     pub copied_objects: u64,
     pub packets: u64,
     pub copy: LocalAllocator,
+    _padding: [u8; 256],
 }
 
 impl WPWorker {
@@ -192,9 +190,8 @@ impl WPWorker {
         };
         if bucket.is_open() {
             // println!("spawn: Bucket is open {}", bucket.name);
-            bucket.count.fetch_add(1, Ordering::SeqCst);
             self.queue.push(Box::new(packet));
-            if GLOBAL.yielded.load(Ordering::SeqCst) > 0 {
+            if GLOBAL.yielded.load(Ordering::Relaxed) > 0 {
                 self.global.cvar.notify_one();
             }
         } else {
@@ -228,6 +225,7 @@ impl crate::util::workers::Worker for WPWorker {
             copied_objects: 0,
             packets: 0,
             copy: LocalAllocator::new(),
+            _padding: [0; 256],
         }
     }
 
