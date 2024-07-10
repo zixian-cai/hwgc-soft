@@ -97,14 +97,20 @@ impl<O: ObjectModel> crate::util::workers::Worker for ParTracingWorker<O> {
         }
         // trace objects
         let mut process_slot = |slot: Slot| {
-            self.slots += 1;
+            if cfg!(feature = "detailed_stats") {
+                self.slots += 1;
+            }
             if let Some(o) = slot.load() {
                 if o.mark(mark_state) {
-                    self.objs += 1;
+                    if cfg!(feature = "detailed_stats") {
+                        self.objs += 1;
+                    }
                     o.scan::<O, _>(|s| self.queue.push(s));
                 }
             } else {
-                self.ne_slots += 1;
+                if cfg!(feature = "detailed_stats") {
+                    self.ne_slots += 1;
+                }
             }
         };
         'outer: loop {
