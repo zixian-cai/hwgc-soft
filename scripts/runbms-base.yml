@@ -75,6 +75,10 @@ modifiers:
   tl:
     type: ProgramArg
     val: "-t {0}"
+  threads:
+    type: EnvVar
+    var: "THREADS"
+    val: "{0}"
 
 runtimes:
   native:
