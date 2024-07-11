@@ -8,6 +8,9 @@ modifiers:
     type: ModifierSet
     val: "run_build-all_in_one|om-OpenJDK|subcommand-trace"
 
+overrides:
+  "invocations": 10
+
 configs:
   - native|common|tl-ParEdgeSlot|threads-4
   - native|common|tl-ParEdgeSlot2|threads-4
