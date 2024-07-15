@@ -4,7 +4,7 @@ use crate::util::side_mark_table::SideMarkTable;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::{Object, Slot};
 use crate::util::workers::WorkerGroup;
-use crate::util::wp2::{self as wp, Packet, WPWorker, GLOBAL};
+use crate::util::wp3::{self as wp, Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
 use std::arch::asm;
 use std::ops::Range;
@@ -250,7 +250,10 @@ struct WPEdgeSlotTracer<O: ObjectModel> {
 
 impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
     fn startup(&self) {
-        info!("Use {} worker threads.", self.group.workers.len());
+        println!(
+            "[WPEdgeSlot3] Use {} worker threads.",
+            self.group.workers.len()
+        );
         self.group.spawn();
         static ONCE: Once = Once::new();
         ONCE.call_once(|| {

@@ -62,6 +62,7 @@ slower_root_scanning = []
 deque_bulk_pop = []
 deque_fast_fence = ["ws-deque/fast_fence"]
 deque_overflow = []
+no_marktable_zeroing = []
 
 [profile.release]
 # lto = true
@@ -257,3 +258,14 @@ iterations = 1
 [package.metadata.harness.profiles.queue_order.builds]
 wp_lifo = { env = { TRACING_LOOP = "WPEdgeSlot" } }
 wp_fifo = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = ["fifo"] }
+
+[package.metadata.harness.profiles.bucket]
+iterations = 1
+
+[package.metadata.harness.profiles.bucket.builds]
+wp = { env = { TRACING_LOOP = "WPEdgeSlot" }, features = [
+    "slower_root_scanning",
+] }
+wp3 = { env = { TRACING_LOOP = "WPEdgeSlot3" }, features = [
+    "slower_root_scanning",
+] }

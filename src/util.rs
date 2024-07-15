@@ -5,6 +5,8 @@ pub mod workers;
 pub mod wp;
 #[macro_use]
 pub mod wp2;
+#[macro_use]
+pub mod wp3;
 pub mod side_mark_table;
 
 use anyhow::Result;

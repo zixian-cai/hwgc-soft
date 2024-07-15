@@ -71,8 +71,12 @@ impl<O: ObjectModel> TracePacket<O> {
 
     fn trace_mark_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
         let marked = if o.space_id() == 0x2 {
-            o.mark_relaxed(mark_state);
-            SIDE_MARK_TABLE_IX.mark(o)
+            if !cfg!(feature = "no_marktable_zeroing") {
+                o.mark(mark_state)
+            } else {
+                o.mark_relaxed(mark_state);
+                SIDE_MARK_TABLE_IX.mark(o)
+            }
         } else {
             o.mark(mark_state)
         };
@@ -213,12 +217,14 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         GLOBAL.mark_state.store(mark_sense, Ordering::SeqCst);
         TO_SPACE.reset();
         // Create fake mark table zeroing packet
-        let entries = SIDE_MARK_TABLE_IX.entries();
-        let chunk_size = entries / self.group.workers.len();
-        for i in (0..entries).step_by(chunk_size) {
-            let range = i..(i + chunk_size).min(entries);
-            let packet = MarkTableZeroingPacket { range };
-            GLOBAL.buckets.prepare.push(Box::new(packet));
+        if !cfg!(feature = "no_marktable_zeroing") {
+            let entries = SIDE_MARK_TABLE_IX.entries();
+            let chunk_size = entries / self.group.workers.len();
+            for i in (0..entries).step_by(chunk_size) {
+                let range = i..(i + chunk_size).min(entries);
+                let packet = MarkTableZeroingPacket { range };
+                GLOBAL.buckets.prepare.push(Box::new(packet));
+            }
         }
         // Create initial root scanning packets
         let roots = object_model.roots();
