@@ -71,7 +71,7 @@ impl<O: ObjectModel> TracePacket<O> {
 
     fn trace_mark_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
         let marked = if o.space_id() == 0x2 {
-            if !cfg!(feature = "no_marktable_zeroing") {
+            if cfg!(feature = "no_marktable_zeroing") {
                 o.mark(mark_state)
             } else {
                 o.mark_relaxed(mark_state);
