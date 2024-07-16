@@ -12,24 +12,39 @@ overrides:
   "invocations": 5
 
 configs:
-  - native|common|tl-ParEdgeSlot|threads-4
-  - native|common|tl-ParEdgeSlot2|threads-4
-  - native|common|tl-WPEdgeSlot|threads-4
+  - native|common|tl-ParEdgeSlot|threads-1
+  - native|common|tl-ParEdgeSlot2|threads-1
+  - native|common|tl-WPEdgeSlot|threads-1
+
+  - native|common|tl-ParEdgeSlot|threads-2
+  - native|common|tl-ParEdgeSlot2|threads-2
+  - native|common|tl-WPEdgeSlot|threads-2
+
+  - native|common|tl-ParEdgeSlot|threads-64
+  - native|common|tl-ParEdgeSlot2|threads-64
+  - native|common|tl-WPEdgeSlot|threads-64
+
+  - native|common|tl-ParEdgeSlot|threads-128
+  - native|common|tl-ParEdgeSlot2|threads-128
+  - native|common|tl-WPEdgeSlot|threads-128
+  # - native|common|tl-ParEdgeSlot|threads-4
+  # - native|common|tl-ParEdgeSlot2|threads-4
+  # - native|common|tl-WPEdgeSlot|threads-4
   # - native|common|tl-WPEdgeSlot2|threads-4
 
-  - native|common|tl-ParEdgeSlot|threads-8
-  - native|common|tl-ParEdgeSlot2|threads-8
-  - native|common|tl-WPEdgeSlot|threads-8
+  # - native|common|tl-ParEdgeSlot|threads-8
+  # - native|common|tl-ParEdgeSlot2|threads-8
+  # - native|common|tl-WPEdgeSlot|threads-8
   # - native|common|tl-WPEdgeSlot2|threads-8
 
-  - native|common|tl-ParEdgeSlot|threads-16
-  - native|common|tl-ParEdgeSlot2|threads-16
-  - native|common|tl-WPEdgeSlot|threads-16
+  # - native|common|tl-ParEdgeSlot|threads-16
+  # - native|common|tl-ParEdgeSlot2|threads-16
+  # - native|common|tl-WPEdgeSlot|threads-16
   # - native|common|tl-WPEdgeSlot2|threads-16
 
-  - native|common|tl-ParEdgeSlot|threads-32
-  - native|common|tl-ParEdgeSlot2|threads-32
-  - native|common|tl-WPEdgeSlot|threads-32
+  # - native|common|tl-ParEdgeSlot|threads-32
+  # - native|common|tl-ParEdgeSlot2|threads-32
+  # - native|common|tl-WPEdgeSlot|threads-32
   # - native|common|tl-WPEdgeSlot2|threads-32
 
   # - native|common|tl-ParEdgeSlot|threads-64
