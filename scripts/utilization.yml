@@ -1,0 +1,25 @@
+# running runbms -p snap-utilization ./results ./scripts/utilization.yml
+
+includes:
+  - "./runbms-base.yml"
+
+modifiers:
+  common:
+    type: ModifierSet
+    val: "run_build-all_in_one|om-OpenJDK|subcommand-utilization"
+
+overrides:
+  "invocations": 1
+
+configs:
+  - native|common|threads-1
+  - native|common|threads-2
+  - native|common|threads-4
+  - native|common|threads-8
+  - native|common|threads-16
+  - native|common|threads-32
+  - native|common|threads-64
+  - native|common|threads-128
+  - native|common|threads-256
+  - native|common|threads-512
+  - native|common|threads-1024

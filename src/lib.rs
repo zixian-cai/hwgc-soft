@@ -33,6 +33,7 @@ pub mod built_info {
 
 pub use crate::analysis::depth::object_depth;
 pub use crate::analysis::reified_analysis;
+pub use crate::analysis::utilization::ideal_utilization;
 pub use crate::cli::*;
 pub use crate::heapdump::{HeapDump, HeapObject, RootEdge};
 pub use crate::object_model::{BidirectionalObjectModel, ObjectModel, OpenJDKObjectModel};

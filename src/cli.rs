@@ -54,9 +54,13 @@ pub struct DepthArgs {
     pub(crate) output_file: String,
 }
 
+#[derive(Parser, Debug, Clone)]
+pub struct UtilizationArgs {}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     Trace(TraceArgs),
     Analyze(AnalysisArgs),
     Depth(DepthArgs),
+    Utilization(UtilizationArgs),
 }

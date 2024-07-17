@@ -9,7 +9,13 @@ use std::time::Instant;
 fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
     for path in &args.paths {
         let start = Instant::now();
-        let heapdump = HeapDump::from_binpb_zst(path)?;
+        let heapdump = match HeapDump::from_binpb_zst(path) {
+            Ok(h) => h,
+            Err(e) => {
+                panic!("Failed to parse heapdump: {} {}", e, path);
+                // continue;
+            }
+        };
         let tibs_cached = object_model.restore_tibs(&heapdump);
         let elapsed = start.elapsed();
         info!(
@@ -28,6 +34,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
             }
             Commands::Analyze(_) => reified_analysis(object_model, args),
             Commands::Depth(_) => object_depth(object_model, args),
+            Commands::Utilization(_) => ideal_utilization(object_model, args),
         }
     } else {
         Ok(())
