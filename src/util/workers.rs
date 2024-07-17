@@ -3,6 +3,8 @@ use std::sync::{
     Arc, Barrier, BarrierWaitResult, Condvar, Mutex, Weak,
 };
 
+use crossbeam::queue::SegQueue;
+
 struct Monitor {
     cvar: Condvar,
     lock: Mutex<usize>,
@@ -135,4 +137,32 @@ pub trait Worker: Send + 'static + Sized {
     fn new_shared(&self) -> Self::SharedWorker;
     /// Run an GC epoch
     fn run_epoch(&mut self);
+}
+
+const YIELD_TIMER: bool = false;
+static mut NOW: Option<std::time::Instant> = None;
+static YIELD: SegQueue<f32> = SegQueue::new();
+
+pub fn thread_done() {
+    if YIELD_TIMER {
+        let elapsed = unsafe { NOW.as_ref().unwrap().elapsed().as_micros() as f32 / 1000.0 };
+        YIELD.push(elapsed);
+    }
+}
+
+pub fn start_epoch() {
+    if YIELD_TIMER {
+        unsafe { NOW = Some(std::time::Instant::now()) }
+    }
+}
+
+pub fn end_epoch() {
+    if YIELD_TIMER {
+        let elapsed = unsafe { NOW.as_ref().unwrap().elapsed().as_micros() as f32 / 1000.0 };
+        let mut per_thread_elapsed = vec![];
+        while let Some(e) = YIELD.pop() {
+            per_thread_elapsed.push(e);
+        }
+        println!("Elapsed: {:.3} ms, {:.3?}", elapsed, per_thread_elapsed);
+    }
 }

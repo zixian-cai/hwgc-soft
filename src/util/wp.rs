@@ -23,7 +23,6 @@ pub struct Buckets {
 }
 
 pub struct Bucket {
-    count: AtomicUsize,
     pub name: &'static str,
     is_open: AtomicBool,
     queue: crossbeam::queue::SegQueue<Box<dyn Packet>>,
@@ -33,7 +32,6 @@ impl Bucket {
     pub const fn new(name: &'static str) -> Self {
         Self {
             name,
-            count: AtomicUsize::new(0),
             is_open: AtomicBool::new(false),
             queue: crossbeam::queue::SegQueue::new(),
         }
@@ -55,11 +53,10 @@ impl Bucket {
     }
 
     pub fn is_open(&self) -> bool {
-        self.is_open.load(Ordering::SeqCst)
+        self.is_open.load(Ordering::Relaxed)
     }
 
     pub fn push(&self, packet: Box<dyn Packet>) {
-        self.count.fetch_add(1, Ordering::SeqCst);
         self.queue.push(packet);
     }
 }
@@ -148,10 +145,10 @@ impl GlobalContext {
     }
 
     pub fn get_stats(&self) -> TracingStats {
-        println!(
-            "total_busy_us {}",
-            self.total_busy_us.load(Ordering::SeqCst)
-        );
+        // println!(
+        //     "total_busy_us {}",
+        //     self.total_busy_us.load(Ordering::SeqCst)
+        // );
         TracingStats {
             marked_objects: self.objs.load(Ordering::SeqCst),
             slots: self.edges.load(Ordering::SeqCst),
@@ -194,9 +191,8 @@ impl WPWorker {
         };
         if bucket.is_open() {
             // println!("spawn: Bucket is open {}", bucket.name);
-            bucket.count.fetch_add(1, Ordering::SeqCst);
             self.queue.push(Box::new(packet));
-            if GLOBAL.yielded.load(Ordering::SeqCst) > 0 {
+            if GLOBAL.yielded.load(Ordering::Relaxed) > 0 {
                 self.global.cvar.notify_one();
             }
         } else {
@@ -320,6 +316,8 @@ impl crate::util::workers::Worker for WPWorker {
             *yielded -= 1;
             GLOBAL.yielded.fetch_sub(1, Ordering::SeqCst);
         }
+
+        super::workers::thread_done();
 
         // println!("Worker #{} exit", self._id);
         // println!("[{:.3}ms] Worker #{} exit", GLOBAL.elapsed(), self._id);

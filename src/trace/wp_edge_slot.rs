@@ -3,7 +3,7 @@ use crate::util::fake_forwarding::TO_SPACE;
 use crate::util::side_mark_table::SideMarkTable;
 use crate::util::tracer::Tracer;
 use crate::util::typed_obj::{Object, Slot};
-use crate::util::workers::WorkerGroup;
+use crate::util::workers::{end_epoch, start_epoch, WorkerGroup};
 use crate::util::wp::{Packet, WPWorker, GLOBAL};
 use crate::{ObjectModel, TraceArgs};
 use std::arch::asm;
@@ -71,8 +71,12 @@ impl<O: ObjectModel> TracePacket<O> {
 
     fn trace_mark_object(&mut self, o: Object, local: &mut WPWorker, mark_state: u8, cap: usize) {
         let marked = if o.space_id() == 0x2 {
-            o.mark_relaxed(mark_state);
-            SIDE_MARK_TABLE_IX.mark(o)
+            if cfg!(feature = "no_marktable_zeroing") {
+                o.mark(mark_state)
+            } else {
+                o.mark_relaxed(mark_state);
+                SIDE_MARK_TABLE_IX.mark(o)
+            }
         } else {
             o.mark(mark_state)
         };
@@ -201,7 +205,10 @@ struct WPEdgeSlotTracer<O: ObjectModel> {
 
 impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
     fn startup(&self) {
-        info!("Use {} worker threads.", self.group.workers.len());
+        println!(
+            "[WPEdgeSlot] Use {} worker threads.",
+            self.group.workers.len()
+        );
         self.group.spawn();
     }
 
@@ -210,12 +217,14 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         GLOBAL.mark_state.store(mark_sense, Ordering::SeqCst);
         TO_SPACE.reset();
         // Create fake mark table zeroing packet
-        let entries = SIDE_MARK_TABLE_IX.entries();
-        let chunk_size = entries / self.group.workers.len();
-        for i in (0..entries).step_by(chunk_size) {
-            let range = i..(i + chunk_size).min(entries);
-            let packet = MarkTableZeroingPacket { range };
-            GLOBAL.buckets.prepare.push(Box::new(packet));
+        if !cfg!(feature = "no_marktable_zeroing") {
+            let entries = SIDE_MARK_TABLE_IX.entries();
+            let chunk_size = entries / self.group.workers.len();
+            for i in (0..entries).step_by(chunk_size) {
+                let range = i..(i + chunk_size).min(entries);
+                let packet = MarkTableZeroingPacket { range };
+                GLOBAL.buckets.prepare.push(Box::new(packet));
+            }
         }
         // Create initial root scanning packets
         let roots = object_model.roots();
@@ -229,7 +238,9 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
         }
         GLOBAL.buckets.prepare.open();
         // Wake up workers
+        start_epoch();
         self.group.run_epoch();
+        end_epoch();
         GLOBAL.get_stats()
     }
 
@@ -239,7 +250,10 @@ impl<O: ObjectModel> Tracer<O> for WPEdgeSlotTracer<O> {
 }
 
 impl<O: ObjectModel> WPEdgeSlotTracer<O> {
-    pub fn new(num_workers: usize) -> Self {
+    pub fn new(mut num_workers: usize) -> Self {
+        if let Ok(x) = std::env::var("THREADS") {
+            num_workers = x.parse().unwrap();
+        }
         Self {
             group: WorkerGroup::new(num_workers),
             _p: PhantomData,

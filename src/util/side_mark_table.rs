@@ -43,11 +43,11 @@ impl SideMarkTable {
                 return false;
             }
             let new = old | mask;
-            match entry.compare_exchange_weak(
+            match entry.compare_exchange(
                 old,
                 new,
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
             ) {
                 Ok(_) => return true,
                 Err(x) => old = x,
