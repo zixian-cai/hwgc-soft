@@ -62,6 +62,67 @@ suites:
       zxing:
         path: "/bin/true"
         args: "$PWD/sampled/zxing/heapdump.2.binpb.zst $PWD/sampled/zxing/heapdump.3.binpb.zst $PWD/sampled/zxing/heapdump.4.binpb.zst"
+  heapdump-lxr:
+    type: BinaryBenchmarkSuite
+    programs:
+      avrora:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/avrora/heapdump.*.binpb.zst"
+      biojava:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/biojava/heapdump.*.binpb.zst"
+      cassandra:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/cassandra/heapdump.*.binpb.zst"
+      eclipse:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/eclipse/heapdump.*.binpb.zst"
+      fop:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/fop/heapdump.*.binpb.zst"
+      graphchi:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/graphchi/heapdump.*.binpb.zst"
+      h2o:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/h2o/heapdump.*.binpb.zst"
+      jme:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/jme/heapdump.*.binpb.zst"
+      jython:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/jython/heapdump.*.binpb.zst"
+      kafka:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/kafka/heapdump.*.binpb.zst"
+      luindex:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/luindex/heapdump.*.binpb.zst"
+      lusearch:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/lusearch/heapdump.*.binpb.zst"
+      pmd:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/pmd/heapdump.*.binpb.zst"
+      spring:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/spring/heapdump.*.binpb.zst"
+      sunflow:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/sunflow/heapdump.*.binpb.zst"
+      tradebeans:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/tradebeans/heapdump.*.binpb.zst"
+      tradesoap:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/tradesoap/heapdump.*.binpb.zst"
+      xalan:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/xalan/heapdump.*.binpb.zst"
+      zxing:
+        path: "/bin/true"
+        args: "$PWD/sampled/lxr/zxing/heapdump.*.binpb.zst"
+
 modifiers:
   run_build:
     type: Wrapper
@@ -85,7 +146,7 @@ runtimes:
     type: NativeExecutable
 
 benchmarks:
-  heapdump:
+  heapdump-lxr:
     - avrora
     - biojava
     - cassandra
@@ -101,6 +162,7 @@ benchmarks:
     - pmd
     - spring
     - sunflow
+    - tradebeans
     - tradesoap
     - xalan
     - zxing
