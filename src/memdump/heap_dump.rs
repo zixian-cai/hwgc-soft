@@ -57,7 +57,7 @@ impl MemdumpWorkload for HeapDumpWorkload {
         memif.write_value_to_target(0x1000 as *mut u64, heapdump.roots.len() as u64);
         info!("Restoring TIBs onto the arena");
         object_model.restore_tibs(&heapdump, &memif, &mut tib_arena);
-        info!("Restoring objects");
+        info!("Restoring {} objects", heapdump.objects.len());
         object_model.restore_objects(&heapdump, &memif, &mut tib_arena);
         for (i, root) in object_model.roots().iter().enumerate() {
             memif.write_pointer_to_target(
