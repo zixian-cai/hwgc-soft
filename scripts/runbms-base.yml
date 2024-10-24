@@ -10,58 +10,70 @@ suites:
     programs:
       avrora:
         path: "/bin/true"
-        args: "$PWD/sampled/avrora/heapdump.6.binpb.zst $PWD/sampled/avrora/heapdump.7.binpb.zst $PWD/sampled/avrora/heapdump.8.binpb.zst $PWD/sampled/avrora/heapdump.9.binpb.zst $PWD/sampled/avrora/heapdump.10.binpb.zst $PWD/sampled/avrora/heapdump.11.binpb.zst $PWD/sampled/avrora/heapdump.12.binpb.zst $PWD/sampled/avrora/heapdump.13.binpb.zst $PWD/sampled/avrora/heapdump.14.binpb.zst $PWD/sampled/avrora/heapdump.15.binpb.zst $PWD/sampled/avrora/heapdump.16.binpb.zst $PWD/sampled/avrora/heapdump.17.binpb.zst $PWD/sampled/avrora/heapdump.18.binpb.zst $PWD/sampled/avrora/heapdump.19.binpb.zst"
+        args: "$PWD/heapdump-ix/avrora/heapdump.*.binpb.zst"
       biojava:
         path: "/bin/true"
-        args: "$PWD/sampled/biojava/heapdump.5.binpb.zst $PWD/sampled/biojava/heapdump.11.binpb.zst $PWD/sampled/biojava/heapdump.17.binpb.zst $PWD/sampled/biojava/heapdump.24.binpb.zst $PWD/sampled/biojava/heapdump.30.binpb.zst $PWD/sampled/biojava/heapdump.37.binpb.zst $PWD/sampled/biojava/heapdump.43.binpb.zst $PWD/sampled/biojava/heapdump.49.binpb.zst $PWD/sampled/biojava/heapdump.56.binpb.zst $PWD/sampled/biojava/heapdump.62.binpb.zst $PWD/sampled/biojava/heapdump.69.binpb.zst $PWD/sampled/biojava/heapdump.75.binpb.zst $PWD/sampled/biojava/heapdump.81.binpb.zst $PWD/sampled/biojava/heapdump.88.binpb.zst $PWD/sampled/biojava/heapdump.94.binpb.zst $PWD/sampled/biojava/heapdump.101.binpb.zst $PWD/sampled/biojava/heapdump.107.binpb.zst $PWD/sampled/biojava/heapdump.113.binpb.zst $PWD/sampled/biojava/heapdump.120.binpb.zst $PWD/sampled/biojava/heapdump.126.binpb.zst"
-      cassandra:
-        path: "/bin/true"
-        args: "$PWD/sampled/cassandra/heapdump.6.binpb.zst $PWD/sampled/cassandra/heapdump.7.binpb.zst $PWD/sampled/cassandra/heapdump.9.binpb.zst $PWD/sampled/cassandra/heapdump.11.binpb.zst $PWD/sampled/cassandra/heapdump.12.binpb.zst $PWD/sampled/cassandra/heapdump.14.binpb.zst $PWD/sampled/cassandra/heapdump.16.binpb.zst $PWD/sampled/cassandra/heapdump.17.binpb.zst $PWD/sampled/cassandra/heapdump.19.binpb.zst $PWD/sampled/cassandra/heapdump.21.binpb.zst $PWD/sampled/cassandra/heapdump.23.binpb.zst $PWD/sampled/cassandra/heapdump.24.binpb.zst $PWD/sampled/cassandra/heapdump.26.binpb.zst $PWD/sampled/cassandra/heapdump.28.binpb.zst $PWD/sampled/cassandra/heapdump.29.binpb.zst $PWD/sampled/cassandra/heapdump.31.binpb.zst $PWD/sampled/cassandra/heapdump.33.binpb.zst $PWD/sampled/cassandra/heapdump.34.binpb.zst $PWD/sampled/cassandra/heapdump.36.binpb.zst $PWD/sampled/cassandra/heapdump.38.binpb.zst"
+        args: "$PWD/heapdump-ix/biojava/heapump.*.binpb.zst"
       eclipse:
         path: "/bin/true"
-        args: "$PWD/sampled/eclipse/heapdump.2.binpb.zst $PWD/sampled/eclipse/heapdump.3.binpb.zst $PWD/sampled/eclipse/heapdump.4.binpb.zst $PWD/sampled/eclipse/heapdump.6.binpb.zst $PWD/sampled/eclipse/heapdump.7.binpb.zst $PWD/sampled/eclipse/heapdump.9.binpb.zst $PWD/sampled/eclipse/heapdump.10.binpb.zst $PWD/sampled/eclipse/heapdump.12.binpb.zst $PWD/sampled/eclipse/heapdump.13.binpb.zst $PWD/sampled/eclipse/heapdump.15.binpb.zst $PWD/sampled/eclipse/heapdump.16.binpb.zst $PWD/sampled/eclipse/heapdump.17.binpb.zst $PWD/sampled/eclipse/heapdump.19.binpb.zst $PWD/sampled/eclipse/heapdump.20.binpb.zst $PWD/sampled/eclipse/heapdump.22.binpb.zst $PWD/sampled/eclipse/heapdump.23.binpb.zst $PWD/sampled/eclipse/heapdump.25.binpb.zst $PWD/sampled/eclipse/heapdump.26.binpb.zst $PWD/sampled/eclipse/heapdump.28.binpb.zst $PWD/sampled/eclipse/heapdump.29.binpb.zst"
-      fop:
-        path: "/bin/true"
-        args: "$PWD/sampled/fop/heapdump.2.binpb.zst $PWD/sampled/fop/heapdump.3.binpb.zst $PWD/sampled/fop/heapdump.4.binpb.zst $PWD/sampled/fop/heapdump.6.binpb.zst $PWD/sampled/fop/heapdump.7.binpb.zst $PWD/sampled/fop/heapdump.9.binpb.zst $PWD/sampled/fop/heapdump.10.binpb.zst $PWD/sampled/fop/heapdump.12.binpb.zst $PWD/sampled/fop/heapdump.13.binpb.zst $PWD/sampled/fop/heapdump.15.binpb.zst $PWD/sampled/fop/heapdump.16.binpb.zst $PWD/sampled/fop/heapdump.17.binpb.zst $PWD/sampled/fop/heapdump.19.binpb.zst $PWD/sampled/fop/heapdump.20.binpb.zst $PWD/sampled/fop/heapdump.22.binpb.zst $PWD/sampled/fop/heapdump.23.binpb.zst $PWD/sampled/fop/heapdump.25.binpb.zst $PWD/sampled/fop/heapdump.26.binpb.zst $PWD/sampled/fop/heapdump.28.binpb.zst $PWD/sampled/fop/heapdump.29.binpb.zst"
+        args: "$PWD/heapdump-ix/eclipse/heapump.*.binpb.zst"
       graphchi:
         path: "/bin/true"
-        args: "$PWD/sampled/graphchi/heapdump.2.binpb.zst $PWD/sampled/graphchi/heapdump.3.binpb.zst $PWD/sampled/graphchi/heapdump.5.binpb.zst $PWD/sampled/graphchi/heapdump.6.binpb.zst $PWD/sampled/graphchi/heapdump.8.binpb.zst $PWD/sampled/graphchi/heapdump.10.binpb.zst $PWD/sampled/graphchi/heapdump.11.binpb.zst $PWD/sampled/graphchi/heapdump.13.binpb.zst $PWD/sampled/graphchi/heapdump.15.binpb.zst $PWD/sampled/graphchi/heapdump.16.binpb.zst $PWD/sampled/graphchi/heapdump.18.binpb.zst $PWD/sampled/graphchi/heapdump.20.binpb.zst $PWD/sampled/graphchi/heapdump.21.binpb.zst $PWD/sampled/graphchi/heapdump.23.binpb.zst $PWD/sampled/graphchi/heapdump.25.binpb.zst $PWD/sampled/graphchi/heapdump.26.binpb.zst $PWD/sampled/graphchi/heapdump.28.binpb.zst $PWD/sampled/graphchi/heapdump.30.binpb.zst $PWD/sampled/graphchi/heapdump.31.binpb.zst $PWD/sampled/graphchi/heapdump.33.binpb.zst"
+        args: "$PWD/heapdump-ix/graphchi/heapdump.*.binpb.zst"
       h2o:
         path: "/bin/true"
-        args: "$PWD/sampled/h2o/heapdump.5.binpb.zst $PWD/sampled/h2o/heapdump.12.binpb.zst $PWD/sampled/h2o/heapdump.20.binpb.zst $PWD/sampled/h2o/heapdump.28.binpb.zst $PWD/sampled/h2o/heapdump.35.binpb.zst $PWD/sampled/h2o/heapdump.43.binpb.zst $PWD/sampled/h2o/heapdump.51.binpb.zst $PWD/sampled/h2o/heapdump.58.binpb.zst $PWD/sampled/h2o/heapdump.66.binpb.zst $PWD/sampled/h2o/heapdump.74.binpb.zst $PWD/sampled/h2o/heapdump.82.binpb.zst $PWD/sampled/h2o/heapdump.89.binpb.zst $PWD/sampled/h2o/heapdump.97.binpb.zst $PWD/sampled/h2o/heapdump.105.binpb.zst $PWD/sampled/h2o/heapdump.112.binpb.zst $PWD/sampled/h2o/heapdump.120.binpb.zst $PWD/sampled/h2o/heapdump.128.binpb.zst $PWD/sampled/h2o/heapdump.135.binpb.zst $PWD/sampled/h2o/heapdump.143.binpb.zst $PWD/sampled/h2o/heapdump.151.binpb.zst"
-      jme:
-        path: "/bin/true"
-        args: "$PWD/sampled/jme/heapdump.2.binpb.zst"
+        args: "$PWD/heapdump-ix/h2o/heapump.*.binpb.zst"
       jython:
         path: "/bin/true"
-        args: "$PWD/sampled/jython/heapdump.26.binpb.zst $PWD/sampled/jython/heapdump.38.binpb.zst $PWD/sampled/jython/heapdump.51.binpb.zst $PWD/sampled/jython/heapdump.64.binpb.zst $PWD/sampled/jython/heapdump.77.binpb.zst $PWD/sampled/jython/heapdump.90.binpb.zst $PWD/sampled/jython/heapdump.103.binpb.zst $PWD/sampled/jython/heapdump.116.binpb.zst $PWD/sampled/jython/heapdump.129.binpb.zst $PWD/sampled/jython/heapdump.142.binpb.zst $PWD/sampled/jython/heapdump.155.binpb.zst $PWD/sampled/jython/heapdump.167.binpb.zst $PWD/sampled/jython/heapdump.180.binpb.zst $PWD/sampled/jython/heapdump.193.binpb.zst $PWD/sampled/jython/heapdump.206.binpb.zst $PWD/sampled/jython/heapdump.219.binpb.zst $PWD/sampled/jython/heapdump.232.binpb.zst $PWD/sampled/jython/heapdump.245.binpb.zst $PWD/sampled/jython/heapdump.258.binpb.zst $PWD/sampled/jython/heapdump.271.binpb.zst"
-      kafka:
-        path: "/bin/true"
-        args: "$PWD/sampled/kafka/heapdump.2.binpb.zst $PWD/sampled/kafka/heapdump.3.binpb.zst $PWD/sampled/kafka/heapdump.4.binpb.zst $PWD/sampled/kafka/heapdump.5.binpb.zst $PWD/sampled/kafka/heapdump.6.binpb.zst $PWD/sampled/kafka/heapdump.7.binpb.zst $PWD/sampled/kafka/heapdump.8.binpb.zst"
+        args: "$PWD/heapdump-ix/jython/heapdump.*.binpb.zst"
       luindex:
         path: "/bin/true"
-        args: "$PWD/sampled/luindex/heapdump.2.binpb.zst $PWD/sampled/luindex/heapdump.3.binpb.zst $PWD/sampled/luindex/heapdump.5.binpb.zst $PWD/sampled/luindex/heapdump.6.binpb.zst $PWD/sampled/luindex/heapdump.8.binpb.zst $PWD/sampled/luindex/heapdump.10.binpb.zst $PWD/sampled/luindex/heapdump.11.binpb.zst $PWD/sampled/luindex/heapdump.13.binpb.zst $PWD/sampled/luindex/heapdump.15.binpb.zst $PWD/sampled/luindex/heapdump.16.binpb.zst $PWD/sampled/luindex/heapdump.18.binpb.zst $PWD/sampled/luindex/heapdump.20.binpb.zst $PWD/sampled/luindex/heapdump.21.binpb.zst $PWD/sampled/luindex/heapdump.23.binpb.zst $PWD/sampled/luindex/heapdump.25.binpb.zst $PWD/sampled/luindex/heapdump.26.binpb.zst $PWD/sampled/luindex/heapdump.28.binpb.zst $PWD/sampled/luindex/heapdump.30.binpb.zst $PWD/sampled/luindex/heapdump.31.binpb.zst $PWD/sampled/luindex/heapdump.33.binpb.zst"
-      lusearch:
-        path: "/bin/true"
-        args: "$PWD/sampled/lusearch/heapdump.22.binpb.zst $PWD/sampled/lusearch/heapdump.59.binpb.zst $PWD/sampled/lusearch/heapdump.97.binpb.zst $PWD/sampled/lusearch/heapdump.134.binpb.zst $PWD/sampled/lusearch/heapdump.172.binpb.zst $PWD/sampled/lusearch/heapdump.209.binpb.zst $PWD/sampled/lusearch/heapdump.247.binpb.zst $PWD/sampled/lusearch/heapdump.284.binpb.zst $PWD/sampled/lusearch/heapdump.322.binpb.zst $PWD/sampled/lusearch/heapdump.359.binpb.zst $PWD/sampled/lusearch/heapdump.397.binpb.zst $PWD/sampled/lusearch/heapdump.434.binpb.zst $PWD/sampled/lusearch/heapdump.472.binpb.zst $PWD/sampled/lusearch/heapdump.509.binpb.zst $PWD/sampled/lusearch/heapdump.547.binpb.zst $PWD/sampled/lusearch/heapdump.584.binpb.zst $PWD/sampled/lusearch/heapdump.622.binpb.zst $PWD/sampled/lusearch/heapdump.659.binpb.zst $PWD/sampled/lusearch/heapdump.697.binpb.zst $PWD/sampled/lusearch/heapdump.734.binpb.zst"
+        args: "$PWD/heapdump-ix/luindex/heapump.*.binpb.zst"
       pmd:
         path: "/bin/true"
-        args: "$PWD/sampled/pmd/heapdump.2.binpb.zst $PWD/sampled/pmd/heapdump.3.binpb.zst $PWD/sampled/pmd/heapdump.5.binpb.zst $PWD/sampled/pmd/heapdump.6.binpb.zst $PWD/sampled/pmd/heapdump.8.binpb.zst $PWD/sampled/pmd/heapdump.10.binpb.zst $PWD/sampled/pmd/heapdump.11.binpb.zst $PWD/sampled/pmd/heapdump.13.binpb.zst $PWD/sampled/pmd/heapdump.15.binpb.zst $PWD/sampled/pmd/heapdump.16.binpb.zst $PWD/sampled/pmd/heapdump.18.binpb.zst $PWD/sampled/pmd/heapdump.20.binpb.zst $PWD/sampled/pmd/heapdump.21.binpb.zst $PWD/sampled/pmd/heapdump.23.binpb.zst $PWD/sampled/pmd/heapdump.25.binpb.zst $PWD/sampled/pmd/heapdump.26.binpb.zst $PWD/sampled/pmd/heapdump.28.binpb.zst $PWD/sampled/pmd/heapdump.30.binpb.zst $PWD/sampled/pmd/heapdump.31.binpb.zst $PWD/sampled/pmd/heapdump.33.binpb.zst"
-      spring:
-        path: "/bin/true"
-        args: "$PWD/sampled/spring/heapdump.32.binpb.zst $PWD/sampled/spring/heapdump.42.binpb.zst $PWD/sampled/spring/heapdump.52.binpb.zst $PWD/sampled/spring/heapdump.62.binpb.zst $PWD/sampled/spring/heapdump.72.binpb.zst $PWD/sampled/spring/heapdump.82.binpb.zst $PWD/sampled/spring/heapdump.92.binpb.zst $PWD/sampled/spring/heapdump.102.binpb.zst $PWD/sampled/spring/heapdump.112.binpb.zst $PWD/sampled/spring/heapdump.122.binpb.zst $PWD/sampled/spring/heapdump.132.binpb.zst $PWD/sampled/spring/heapdump.142.binpb.zst $PWD/sampled/spring/heapdump.152.binpb.zst $PWD/sampled/spring/heapdump.162.binpb.zst $PWD/sampled/spring/heapdump.172.binpb.zst $PWD/sampled/spring/heapdump.182.binpb.zst $PWD/sampled/spring/heapdump.192.binpb.zst $PWD/sampled/spring/heapdump.202.binpb.zst $PWD/sampled/spring/heapdump.212.binpb.zst $PWD/sampled/spring/heapdump.222.binpb.zst"
+        args: "$PWD/heapdump-ix/pmd/heapump.*.binpb.zst"
       sunflow:
         path: "/bin/true"
-        args: "$PWD/sampled/sunflow/heapdump.14.binpb.zst $PWD/sampled/sunflow/heapdump.38.binpb.zst $PWD/sampled/sunflow/heapdump.62.binpb.zst $PWD/sampled/sunflow/heapdump.87.binpb.zst $PWD/sampled/sunflow/heapdump.111.binpb.zst $PWD/sampled/sunflow/heapdump.135.binpb.zst $PWD/sampled/sunflow/heapdump.160.binpb.zst $PWD/sampled/sunflow/heapdump.184.binpb.zst $PWD/sampled/sunflow/heapdump.208.binpb.zst $PWD/sampled/sunflow/heapdump.233.binpb.zst $PWD/sampled/sunflow/heapdump.257.binpb.zst $PWD/sampled/sunflow/heapdump.281.binpb.zst $PWD/sampled/sunflow/heapdump.306.binpb.zst $PWD/sampled/sunflow/heapdump.330.binpb.zst $PWD/sampled/sunflow/heapdump.354.binpb.zst $PWD/sampled/sunflow/heapdump.379.binpb.zst $PWD/sampled/sunflow/heapdump.403.binpb.zst $PWD/sampled/sunflow/heapdump.427.binpb.zst $PWD/sampled/sunflow/heapdump.452.binpb.zst $PWD/sampled/sunflow/heapdump.476.binpb.zst"
-      tradesoap:
+        args: "$PWD/heapdump-ix/sunflow/heapump.*.binpb.zst"
+      tradebeans:
         path: "/bin/true"
-        args: "$PWD/sampled/tradesoap/heapdump.10.binpb.zst $PWD/sampled/tradesoap/heapdump.14.binpb.zst $PWD/sampled/tradesoap/heapdump.18.binpb.zst $PWD/sampled/tradesoap/heapdump.22.binpb.zst $PWD/sampled/tradesoap/heapdump.26.binpb.zst $PWD/sampled/tradesoap/heapdump.31.binpb.zst $PWD/sampled/tradesoap/heapdump.35.binpb.zst $PWD/sampled/tradesoap/heapdump.39.binpb.zst $PWD/sampled/tradesoap/heapdump.43.binpb.zst $PWD/sampled/tradesoap/heapdump.47.binpb.zst $PWD/sampled/tradesoap/heapdump.52.binpb.zst $PWD/sampled/tradesoap/heapdump.56.binpb.zst $PWD/sampled/tradesoap/heapdump.60.binpb.zst $PWD/sampled/tradesoap/heapdump.64.binpb.zst $PWD/sampled/tradesoap/heapdump.68.binpb.zst $PWD/sampled/tradesoap/heapdump.73.binpb.zst $PWD/sampled/tradesoap/heapdump.77.binpb.zst $PWD/sampled/tradesoap/heapdump.81.binpb.zst $PWD/sampled/tradesoap/heapdump.85.binpb.zst $PWD/sampled/tradesoap/heapdump.89.binpb.zst"
+        args: "$PWD/heapdump-ix/tradebeans/heapdump.*.binpb.zst"
       xalan:
         path: "/bin/true"
-        args: "$PWD/sampled/xalan/heapdump.10.binpb.zst $PWD/sampled/xalan/heapdump.27.binpb.zst $PWD/sampled/xalan/heapdump.45.binpb.zst $PWD/sampled/xalan/heapdump.63.binpb.zst $PWD/sampled/xalan/heapdump.81.binpb.zst $PWD/sampled/xalan/heapdump.99.binpb.zst $PWD/sampled/xalan/heapdump.117.binpb.zst $PWD/sampled/xalan/heapdump.135.binpb.zst $PWD/sampled/xalan/heapdump.153.binpb.zst $PWD/sampled/xalan/heapdump.171.binpb.zst $PWD/sampled/xalan/heapdump.189.binpb.zst $PWD/sampled/xalan/heapdump.207.binpb.zst $PWD/sampled/xalan/heapdump.225.binpb.zst $PWD/sampled/xalan/heapdump.243.binpb.zst $PWD/sampled/xalan/heapdump.261.binpb.zst $PWD/sampled/xalan/heapdump.279.binpb.zst $PWD/sampled/xalan/heapdump.297.binpb.zst $PWD/sampled/xalan/heapdump.315.binpb.zst $PWD/sampled/xalan/heapdump.333.binpb.zst $PWD/sampled/xalan/heapdump.351.binpb.zst"
+        args: "$PWD/heapdump-ix/xalan/heapump.*.binpb.zst"
+      batik:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/batik/heapump.*.binpb.zst"
+      cassandra:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/cassandra/heapump.*.binpb.zst"
+      fop:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/fop/heapump.*.binpb.zst"
+      h2:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/h2/heapdump.*.binpb.zst"
+      jme:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/jme/heapump.*.binpb.zst"
+      kafka:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/kafka/heapump.*.binpb.zst"
+      lusearch:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/lusearch/heapdump.*.binpb.zst"
+      spring:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/spring/heapdump.*.binpb.zst"
+      tomcat:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/tomcat/heapdump.*.binpb.zst"
+      tradesoap:
+        path: "/bin/true"
+        args: "$PWD/heapdump-ix/tradesoap/heapump.*.binpb.zst"
       zxing:
         path: "/bin/true"
-        args: "$PWD/sampled/zxing/heapdump.2.binpb.zst $PWD/sampled/zxing/heapdump.3.binpb.zst $PWD/sampled/zxing/heapdump.4.binpb.zst"
+        args: "$PWD/heapdump-ix/zxing/heapump.*.binpb.zst"
 modifiers:
   run_build:
     type: Wrapper

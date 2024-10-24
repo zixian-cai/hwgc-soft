@@ -18,3 +18,4 @@ target/
 /*.zip
 /_*
 /protoc
+/heapdump-ix

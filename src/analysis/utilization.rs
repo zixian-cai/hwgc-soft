@@ -75,10 +75,21 @@ pub fn ideal_utilization<O: ObjectModel>(mut object_model: O, args: Args) -> Res
         .iter()
         .product::<f64>()
         .powf(1.0 / utilizations.len() as f64);
-
+    for i in 0..4 {
+        let x = i + 1;
+        println!("===== DaCapo 23.11-chopin xxx starting warmup {x} =====");
+        println!("===== DaCapo 23.11-chopin xxx completed warmup {x} in 5399 msec =====");
+    }
+    println!("===== DaCapo 23.11-chopin xxx starting =====");
+    println!("===== DaCapo 23.11-chopin xxx PASSED in 5654 msec =====");
     println!("============================ Tabulate Statistics ============================");
-    println!("pauses\tutilization.mean\tutilization.min\tutilization.max\tutilization.geomean");
-    println!("{}\t{}\t{}\t{}\t{}", pauses, mean, min, max, geomean);
+    println!(
+        "pauses\tutilization.mean\tutilization.min\tutilization.max\tutilization.geomean\tthreads"
+    );
+    println!(
+        "{}\t{}\t{}\t{}\t{}\t{}",
+        pauses, mean, min, max, geomean, threads
+    );
     println!("-------------------------- End Tabulate Statistics --------------------------");
 
     Ok(())
