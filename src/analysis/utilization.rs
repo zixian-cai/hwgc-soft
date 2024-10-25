@@ -84,7 +84,7 @@ pub fn ideal_utilization<O: ObjectModel>(mut object_model: O, args: Args) -> Res
     println!("===== DaCapo 23.11-chopin xxx PASSED in 5654 msec =====");
     println!("============================ Tabulate Statistics ============================");
     println!(
-        "pauses\tutilization.mean\tutilization.min\tutilization.max\tutilization.geomean\tthreads"
+        "pauses\ttrace.util.mean\ttrace.util.min\ttrace.util.max\ttrace.util.geomean\tthreads"
     );
     println!(
         "{}\t{}\t{}\t{}\t{}\t{}",

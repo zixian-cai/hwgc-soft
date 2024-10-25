@@ -1,5 +1,5 @@
 includes:
-  - "$RUNNING_NG_PACKAGE_DATA/base/runbms-anu.yml"
+  - "$RUNNING_NG_PACKAGE_DATA/base/runbms.yml"
 
 overrides:
   "invocations": 40
@@ -13,52 +13,52 @@ suites:
         args: "$PWD/heapdump-ix/avrora/heapdump.*.binpb.zst"
       biojava:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/biojava/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/biojava/heapdump.*.binpb.zst"
       eclipse:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/eclipse/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/eclipse/heapdump.*.binpb.zst"
       graphchi:
         path: "/bin/true"
         args: "$PWD/heapdump-ix/graphchi/heapdump.*.binpb.zst"
       h2o:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/h2o/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/h2o/heapdump.*.binpb.zst"
       jython:
         path: "/bin/true"
         args: "$PWD/heapdump-ix/jython/heapdump.*.binpb.zst"
       luindex:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/luindex/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/luindex/heapdump.*.binpb.zst"
       pmd:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/pmd/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/pmd/heapdump.*.binpb.zst"
       sunflow:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/sunflow/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/sunflow/heapdump.*.binpb.zst"
       tradebeans:
         path: "/bin/true"
         args: "$PWD/heapdump-ix/tradebeans/heapdump.*.binpb.zst"
       xalan:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/xalan/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/xalan/heapdump.*.binpb.zst"
       batik:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/batik/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/batik/heapdump.*.binpb.zst"
       cassandra:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/cassandra/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/cassandra/heapdump.*.binpb.zst"
       fop:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/fop/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/fop/heapdump.*.binpb.zst"
       h2:
         path: "/bin/true"
         args: "$PWD/heapdump-ix/h2/heapdump.*.binpb.zst"
       jme:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/jme/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/jme/heapdump.*.binpb.zst"
       kafka:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/kafka/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/kafka/heapdump.*.binpb.zst"
       lusearch:
         path: "/bin/true"
         args: "$PWD/heapdump-ix/lusearch/heapdump.*.binpb.zst"
@@ -70,10 +70,10 @@ suites:
         args: "$PWD/heapdump-ix/tomcat/heapdump.*.binpb.zst"
       tradesoap:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/tradesoap/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/tradesoap/heapdump.*.binpb.zst"
       zxing:
         path: "/bin/true"
-        args: "$PWD/heapdump-ix/zxing/heapump.*.binpb.zst"
+        args: "$PWD/heapdump-ix/zxing/heapdump.*.binpb.zst"
 modifiers:
   run_build:
     type: Wrapper
@@ -97,13 +97,15 @@ runtimes:
     type: NativeExecutable
 
 benchmarks:
-  heapdump-lxr:
+  heapdump:
     - avrora
+    - batik
     - biojava
     - cassandra
     - eclipse
     - fop
     - graphchi
+    - h2
     - h2o
     - jme
     - jython
@@ -113,6 +115,7 @@ benchmarks:
     - pmd
     - spring
     - sunflow
+    - tomcat
     - tradebeans
     - tradesoap
     - xalan

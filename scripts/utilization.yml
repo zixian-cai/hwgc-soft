@@ -1,4 +1,4 @@
-# running runbms -p snap-utilization ./results ./scripts/utilization.yml
+# running runbms -p ideal-utilization ./results ./scripts/utilization.yml
 
 includes:
   - "./runbms-base.yml"
@@ -9,7 +9,8 @@ modifiers:
     val: "run_build-all_in_one|om-OpenJDK|subcommand-utilization"
 
 overrides:
-  "invocations": 1
+  invocations: 1
+  remote: false
 
 configs:
   - native|common|threads-1
