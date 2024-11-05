@@ -1,6 +1,6 @@
 use crate::{object_model::Header, Args, MemoryInterface, ObjectModel};
 
-use super::MemdumpWorkload;
+use super::{Memdump, MemdumpWorkload};
 
 pub(super) struct LinkedList {
     num_nodes: usize,
@@ -13,11 +13,11 @@ impl LinkedList {
 }
 
 impl MemdumpWorkload for LinkedList {
-    unsafe fn gen_memdump<O: ObjectModel>(
+    unsafe fn gen_memdump<O: ObjectModel, M: Memdump>(
         &self,
         _object_model: O,
         _args: Args,
-        md: &mut super::Memdump,
+        md: &mut M,
     ) {
         info!("Synthetic memdump of a linked list");
         // The address space of the linked list looks like
@@ -71,11 +71,11 @@ impl HeapLinkedList {
 }
 
 impl MemdumpWorkload for HeapLinkedList {
-    unsafe fn gen_memdump<O: ObjectModel>(
+    unsafe fn gen_memdump<O: ObjectModel, M: Memdump>(
         &self,
         _object_model: O,
         _args: Args,
-        md: &mut super::Memdump,
+        md: &mut M,
     ) {
         info!("Synthetic memdump of a linked list using bidirectional object model");
         // The address space of the linked list looks like
@@ -131,7 +131,10 @@ impl MemdumpWorkload for HeapLinkedList {
         };
         // the 8 offset is because for bidirectional
         // object ref is obj start + 8 * num of primitive fields
-        memif.write_pointer_to_target(0x1008 as *mut *const u64, get_obj_address(0).wrapping_add(8) as *const u64);
+        memif.write_pointer_to_target(
+            0x1008 as *mut *const u64,
+            get_obj_address(0).wrapping_add(8) as *const u64,
+        );
 
         for i in 0..node_groups {
             for j in 0..group_size {

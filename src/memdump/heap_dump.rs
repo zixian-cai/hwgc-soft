@@ -1,4 +1,4 @@
-use super::MemdumpWorkload;
+use super::{Memdump, MemdumpMapping, MemdumpWorkload};
 use crate::*;
 
 pub(super) struct HeapDumpWorkload {}
@@ -10,11 +10,11 @@ impl HeapDumpWorkload {
 }
 
 impl MemdumpWorkload for HeapDumpWorkload {
-    unsafe fn gen_memdump<O: ObjectModel>(
+    unsafe fn gen_memdump<O: ObjectModel, M: Memdump>(
         &self,
         mut object_model: O,
         args: Args,
-        md: &mut super::Memdump,
+        md: &mut M,
     ) {
         assert_eq!(
             args.paths.len(),
