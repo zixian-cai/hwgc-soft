@@ -50,7 +50,7 @@ impl HeapDump {
         Ok(())
     }
 
-    pub fn calculate_space_limits(&self) -> Vec<SpaceLimit> {
+    pub(crate) fn calculate_space_limits(&self) -> Vec<SpaceLimit> {
         let mut limits = vec![];
         for s in &self.spaces {
             limits.push(SpaceLimit {

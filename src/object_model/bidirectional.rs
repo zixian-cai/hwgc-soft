@@ -223,7 +223,7 @@ impl<const HEADER: bool> ObjectModel for BidirectionalObjectModel<HEADER> {
     fn restore_tibs<M>(
         &mut self,
         heapdump: &HeapDump,
-        memif: &M,
+        _memif: &M,
         tib_arena: &mut BumpAllocationArena,
     ) -> usize
     where

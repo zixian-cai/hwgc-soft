@@ -392,8 +392,8 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
     fn restore_tibs<M>(
         &mut self,
         heapdump: &HeapDump,
-        memif: &M,
-        tib_arena: &mut BumpAllocationArena,
+        _memif: &M,
+        _tib_arena: &mut BumpAllocationArena,
     ) -> usize
     where
         M: MemoryInterface,
@@ -415,7 +415,7 @@ impl<const AE: bool> ObjectModel for OpenJDKObjectModel<AE> {
         &mut self,
         heapdump: &HeapDump,
         memif: &M,
-        tib_arena: &mut BumpAllocationArena,
+        _tib_arena: &mut BumpAllocationArena,
     ) where
         M: MemoryInterface,
     {
