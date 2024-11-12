@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use crate::{heapdump::Space, object_model::Header, *};
 
 #[allow(clippy::enum_variant_names)]
-enum Work {
-    ProcessEdges { start: *mut u64, count: u64 },
-    ProcessEdge(*mut u64),
-    ProcessNode(u64),
+pub(super) enum Work {
+    MarkObject(u64),
+    LoadTIB(u64),
+    ScanObject(u64),
+    ScanRefarray(u64),
+    Edges { start: *mut u64, count: u64 },
 }
 
 pub(super) struct TaggedWork {
@@ -31,56 +33,37 @@ impl super::Analysis {
         if let Worker::Numbered(x) = work.creator {
             if let Worker::Numbered(y) = work.worker {
                 if x != y {
-                    self.stats.total_msgs += 1;
-                    match work.work {
-                        Work::ProcessEdges { .. } => self.stats.msg_process_edges += 1,
-                        Work::ProcessEdge(_) => self.stats.msg_process_edge += 1,
-                        Work::ProcessNode(_) => self.stats.msg_process_node += 1,
-                    }
+                    self.stats
+                        .external_messages
+                        .entry((x, std::mem::discriminant(&work.work)))
+                        .and_modify(|e| *e += 1)
+                        .or_insert(1);
+                } else {
+                    self.stats
+                        .internal_messages
+                        .entry((x, std::mem::discriminant(&work.work)))
+                        .and_modify(|e| *e += 1)
+                        .or_insert(1);
                 }
             }
         }
         self.work_queue.push_back(work);
     }
 
-    pub(super) fn create_root_work(&mut self, root: u64) {
-        let tagged_work = TaggedWork {
+    pub(super) fn create_root_edges_work(&mut self, worker: usize, start: *mut u64, count: u64) {
+        let work = TaggedWork {
             creator: Worker::Environment,
-            worker: Worker::Numbered(self.get_owner_thread(root)),
-            work: Work::ProcessNode(root),
-        };
-        self.create_work(tagged_work);
-    }
-
-    fn create_process_edge_work(&mut self, creator: usize, worker: usize, e: *mut u64) {
-        let work = TaggedWork {
-            creator: Worker::Numbered(creator),
             worker: Worker::Numbered(worker),
-            work: Work::ProcessEdge(e),
+            work: Work::Edges { start, count },
         };
         self.create_work(work);
     }
 
-    fn create_process_edges_work(
-        &mut self,
-        creator: usize,
-        worker: usize,
-        start: *mut u64,
-        count: u64,
-    ) {
+    fn create_edges_work(&mut self, creator: usize, worker: usize, start: *mut u64, count: u64) {
         let work = TaggedWork {
             creator: Worker::Numbered(creator),
             worker: Worker::Numbered(worker),
-            work: Work::ProcessEdges { start, count },
-        };
-        self.create_work(work);
-    }
-
-    fn create_process_node_work(&mut self, creator: usize, worker: usize, o: u64) {
-        let work = TaggedWork {
-            creator: Worker::Numbered(creator),
-            worker: Worker::Numbered(worker),
-            work: Work::ProcessNode(o),
+            work: Work::Edges { start, count },
         };
         self.create_work(work);
     }
@@ -111,27 +94,28 @@ impl super::Analysis {
     ) {
         let inner_work = work.work;
         match inner_work {
-            Work::ProcessEdges { start, count } => {
-                if let Worker::Numbered(w) = work.worker {
-                    if let Worker::Numbered(c) = work.creator {
-                        self.do_process_edges(c, w, start, count);
-                    }
-                }
-            }
-            Work::ProcessEdge(e) => {
-                if let Worker::Numbered(w) = work.worker {
-                    if let Worker::Numbered(c) = work.creator {
-                        self.do_process_edge(c, w, e);
-                    }
-                }
-            }
-            Work::ProcessNode(o) => {
-                if self.group_slots {
-                    self.do_process_node_grouped::<O>(o, object_sizes)
-                } else {
-                    self.do_process_node::<O>(o, object_sizes)
-                }
-            }
+            // Work::ProcessEdges { start, count } => {
+            //     if let Worker::Numbered(w) = work.worker {
+            //         if let Worker::Numbered(c) = work.creator {
+            //             self.do_process_edges(c, w, start, count);
+            //         }
+            //     }
+            // }
+            // Work::ProcessEdge(e) => {
+            //     if let Worker::Numbered(w) = work.worker {
+            //         if let Worker::Numbered(c) = work.creator {
+            //             self.do_process_edge(c, w, e);
+            //         }
+            //     }
+            // }
+            // Work::ProcessNode(o) => {
+            //     if self.group_slots {
+            //         self.do_process_node_grouped::<O>(o, object_sizes)
+            //     } else {
+            //         self.do_process_node::<O>(o, object_sizes)
+            //     }
+            // }
+            _ => unimplemented!(),
         }
     }
 
@@ -188,7 +172,7 @@ impl super::Analysis {
                     let child = unsafe { *edge };
                     self.do_visible_slot(object_owner, child);
                 } else {
-                    self.create_process_edge_work(object_owner, edge_owner, edge);
+                    // self.create_process_edge_work(object_owner, edge_owner, edge);
                     completly_visible = false;
                 }
             }
@@ -206,7 +190,7 @@ impl super::Analysis {
             self.stats.visible_empty_slots += 1;
         } else {
             let child_owner = self.get_owner_thread(child);
-            self.create_process_node_work(worker, child_owner, child);
+            // self.create_process_node_work(worker, child_owner, child);
             if child_owner == worker {
                 self.stats.visible_non_empty_slots_visible_child += 1;
             } else {
@@ -254,7 +238,7 @@ impl super::Analysis {
                     let child = unsafe { *edge };
                     self.do_visible_slot(object_owner, child);
                 } else {
-                    self.create_process_edge_work(object_owner, edge_owner, edge);
+                    // self.create_process_edge_work(object_owner, edge_owner, edge);
                     completly_visible = false;
                 }
                 return;
@@ -265,7 +249,7 @@ impl super::Analysis {
             let stride_end = self.get_stride_end(edge);
             // We need to send something to the edge owner regardless
             // println!("{}->{} {:?}*{}", object_owner, edge_owner, edge, repeat);
-            self.create_process_edges_work(object_owner, edge_owner, edge, repeat);
+            // self.create_process_edges_work(object_owner, edge_owner, edge, repeat);
             if edge_owner != object_owner {
                 completly_visible = false;
             }
@@ -298,7 +282,7 @@ impl super::Analysis {
                         completly_visible = false;
                     }
                     // println!("{}->{} {:?}*{}", object_owner, edge_owner, edge, repeat);
-                    self.create_process_edges_work(object_owner, worker, edge, repeat);
+                    // self.create_process_edges_work(object_owner, worker, edge, repeat);
                 }
             }
         });
@@ -336,7 +320,7 @@ impl super::Analysis {
         if child != 0 {
             let child_owner = self.get_owner_thread(child);
             let is_child_visile = child_owner == edge_owner;
-            self.create_process_node_work(edge_owner, child_owner, child);
+            // self.create_process_node_work(edge_owner, child_owner, child);
             if is_child_visile {
                 self.stats.invisible_non_empty_slots_visible_child += 1;
             } else {
@@ -382,7 +366,7 @@ impl super::Analysis {
                 if child != 0 {
                     let child_owner = self.get_owner_thread(child);
                     let is_child_visile = child_owner == worker;
-                    self.create_process_node_work(worker, child_owner, child);
+                    // self.create_process_node_work(worker, child_owner, child);
                     if are_visible_slots {
                         if is_child_visile {
                             self.stats.visible_non_empty_slots_visible_child += 1;

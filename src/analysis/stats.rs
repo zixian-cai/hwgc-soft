@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use super::Work;
+use std::{collections::HashMap, mem::Discriminant};
 
 /// Statistics about communication in a distributed near-memory GC
 ///
@@ -57,10 +58,8 @@ pub(super) struct AnalysisStats {
     pub(super) los_objarrays: u64,
     pub(super) completely_visible_objects: u64,
     /// Total number of inter-worker messages sent
-    pub(super) total_msgs: u64,
-    pub(super) msg_process_node: u64,
-    pub(super) msg_process_edge: u64,
-    pub(super) msg_process_edges: u64,
+    pub(super) external_messages: HashMap<(usize, Discriminant<Work>), usize>,
+    pub(super) internal_messages: HashMap<(usize, Discriminant<Work>), usize>,
     /// Total number of slots
     pub(super) slots: u64,
     pub(super) empty_root_slots: u64,
@@ -106,7 +105,6 @@ impl AnalysisStats {
             "{}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t\
             {}\t{}\t{}\t{}\t\
-            {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t\
             {}\t{}\t\
             {}\t{}\t\
@@ -118,10 +116,6 @@ impl AnalysisStats {
             self.total_object_size,
             self.los_object_size,
             self.los_objarray_size,
-            self.total_msgs,
-            self.msg_process_node,
-            self.msg_process_edge,
-            self.msg_process_edges,
             self.slots,
             self.visible_empty_slots,
             self.visible_non_empty_slots_visible_child,
@@ -151,10 +145,10 @@ impl AnalysisStats {
                 + self.non_empty_root_slots
                 + self.empty_root_slots
         );
-        debug_assert_eq!(
-            self.total_msgs,
-            self.msg_process_edge + self.msg_process_edges + self.msg_process_node
-        );
+        // debug_assert_eq!(
+        //     self.total_msgs,
+        //     self.msg_process_edge + self.msg_process_edges + self.msg_process_node
+        // );
         debug_assert_eq!(self.total_work, self.work_dist.values().sum());
     }
 }

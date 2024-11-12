@@ -1,5 +1,6 @@
 use crate::*;
 use anyhow::Result;
+use std::alloc;
 use std::collections::VecDeque;
 use std::path::Path;
 
@@ -48,18 +49,45 @@ impl Analysis {
     }
 
     fn run<O: ObjectModel>(&mut self, o: &O) {
+        let num_roots = o.roots().len();
+        // Gather stats about roots
         for root in o.roots() {
             self.stats.slots += 1;
             if *root != 0 {
                 self.stats.non_empty_root_slots += 1;
-                self.create_root_work(*root);
             } else {
                 self.stats.empty_root_slots += 1;
             }
         }
+
+        // Write roots to raw memory for GC workers to use
+        let root_pages_layout =
+            alloc::Layout::from_size_align(num_roots * size_of::<u64>(), 4096).unwrap();
+        let root_pages_raw = unsafe { alloc::alloc(root_pages_layout) };
+        unsafe {
+            std::ptr::copy(
+                o.roots().as_ptr(),
+                root_pages_raw as *mut u64,
+                o.roots().len(),
+            );
+        }
+        if !self.group_slots {
+            for i in 0..o.roots().len() {
+                let e = (root_pages_raw as *mut u64).wrapping_add(i);
+                let worker = self.get_owner_thread(e as u64);
+                self.create_root_edges_work(worker, e, 1);
+            }
+        } else {
+            for i in 0..self.num_threads {
+                self.create_root_edges_work(i, root_pages_raw as *mut u64, num_roots as u64);
+            }
+        }
         let object_sizes = o.object_sizes();
-        // I don't think the OpenJDK heapdump gives any empty roots
-        debug_assert_eq!(self.work_queue.len(), o.roots().len());
+        // If group-slots optimization is not enable, then the work queue
+        // depth should be equal to the number of roots
+        if !self.group_slots {
+            debug_assert_eq!(self.work_queue.len(), o.roots().len());
+        }
         while let Some(tagged_work) = self.work_queue.pop_front() {
             self.do_work::<O>(tagged_work, object_sizes);
         }
@@ -70,6 +98,7 @@ impl Analysis {
         //         error!("0x{:x} not marked by transitive closure", n);
         //     }
         // }
+        unsafe { alloc::dealloc(root_pages_raw, root_pages_layout) };
     }
 }
 
@@ -79,6 +108,11 @@ pub fn reified_analysis<O: ObjectModel>(mut object_model: O, args: Args) -> Resu
     } else {
         panic!("Incorrect dispatch");
     };
+    assert_eq!(
+        args.object_model,
+        ObjectModelChoice::Bidirectional,
+        "The distributed GC work analysis assumes bidirectional for now"
+    );
     let mut analysis = Analysis::from_args(analysis_args);
     for path in &args.paths {
         let p: &Path = path.as_ref();
