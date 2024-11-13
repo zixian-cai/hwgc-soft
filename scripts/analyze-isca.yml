@@ -27,7 +27,7 @@ configs:
   - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-3|owner_shift-16"
   # 16 threads
   - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-4|owner_shift-16"
-  # 16 threads
+  # 32 threads
   - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-5|owner_shift-16"
   # RLE
   - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-16|rle"
