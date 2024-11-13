@@ -1,4 +1,4 @@
-# running runbms results ./scripts/analyze-fast.yml -p "pimgc-isca-2025-ablation"
+# running runbms results ./scripts/analyze-isca.yml -p "pimgc-isca-2025-ablation"
 
 includes:
   - "./runbms-base.yml"
@@ -23,3 +23,11 @@ configs:
   - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-16|rle"
   # RLE + Eager load
   - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-16|rle|eager_load"
+
+plugins:
+  zulip:
+    request:
+      to: running-ng bots
+      topic: pimgc-isca-2025 ablation
+      type: stream
+    type: Zulip
