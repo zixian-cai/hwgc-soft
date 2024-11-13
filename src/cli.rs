@@ -45,7 +45,9 @@ pub struct AnalysisArgs {
     #[arg(short, long, default_value_t = 3)]
     pub(crate) log_num_threads: usize,
     #[arg(short, long, default_value_t = false)]
-    pub(crate) group_slots: bool,
+    pub(crate) rle: bool,
+    #[arg(short, long, default_value_t = false)]
+    pub(crate) eager_load: bool,
 }
 
 #[derive(Parser, Debug, Clone)]
