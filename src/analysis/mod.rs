@@ -32,7 +32,7 @@ impl Analysis {
             log_num_threads: args.log_num_threads,
             num_threads: 1 << args.log_num_threads,
             work_queue: VecDeque::new(),
-            stats: Default::default(),
+            stats: AnalysisStats::new(1 << args.log_num_threads),
             rle: args.rle,
             log_pointer_size: 3,
             stride_length: 1 << args.owner_shift,

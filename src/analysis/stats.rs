@@ -39,6 +39,7 @@ use std::{collections::HashMap, mem::Discriminant};
 /// sent.
 #[derive(Default)]
 pub(super) struct AnalysisStats {
+    num_threads: usize,
     /// Total amount of work
     ///
     /// This is equal to the the number of non-empty slots + invisible slots
@@ -78,13 +79,19 @@ pub(super) struct AnalysisStats {
 }
 
 impl AnalysisStats {
+    pub(super) fn new(num_threads: usize) -> Self {
+        Self {
+            num_threads,
+            ..Default::default()
+        }
+    }
+
     pub(super) fn print(&self) {
         let mut dist: Vec<(usize, u64)> = self
             .work_dist
             .iter()
             .map(|(worker, work_cnt)| (*worker, *work_cnt))
             .collect();
-        let num_workers = dist.len();
         dist.sort_by_key(|(worker, _)| *worker);
         let discriminants: [(Discriminant<Work>, &'static str); 5] = [
             (std::mem::discriminant(&Work::MarkObject(0)), "MarkObject"),
@@ -122,12 +129,12 @@ impl AnalysisStats {
             print!("\twork.{}", x);
         }
         for (_, ds) in discriminants {
-            for i in 0..num_workers {
+            for i in 0..self.num_threads {
                 print!("\tinternal_msg.{}.{}", i, ds);
             }
         }
         for (_, ds) in discriminants {
-            for i in 0..num_workers {
+            for i in 0..self.num_threads {
                 print!("\texternal_msg.{}.{}", i, ds);
             }
         }
@@ -163,7 +170,7 @@ impl AnalysisStats {
             print!("\t{}", work_cnt);
         }
         for (dis, _) in discriminants {
-            for i in 0..num_workers {
+            for i in 0..self.num_threads {
                 let count = self
                     .internal_messages
                     .get(&(i, dis))
@@ -173,7 +180,7 @@ impl AnalysisStats {
             }
         }
         for (dis, _) in discriminants {
-            for i in 0..num_workers {
+            for i in 0..self.num_threads {
                 let count = self
                     .external_messages
                     .get(&(i, dis))
