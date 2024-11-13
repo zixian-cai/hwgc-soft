@@ -55,7 +55,18 @@ impl Analysis {
         // Write roots to raw memory for GC workers to use
         let root_pages_layout =
             alloc::Layout::from_size_align(num_roots * size_of::<u64>(), 4096).unwrap();
-        let root_pages_raw = unsafe { alloc::alloc(root_pages_layout) };
+        // Manually create pages to hold roots on high enough address that MMTk
+        // doesn't use so we have determinism.
+        let root_pages_raw = unsafe {
+            libc::mmap(
+                0xa0000000000 as *mut libc::c_void,
+                root_pages_layout.size(),
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
+                -1,
+                0,
+            )
+        };
         unsafe {
             std::ptr::copy(
                 o.roots().as_ptr(),
@@ -92,7 +103,7 @@ impl Analysis {
         //         error!("0x{:x} not marked by transitive closure", n);
         //     }
         // }
-        unsafe { alloc::dealloc(root_pages_raw, root_pages_layout) };
+        unsafe { libc::munmap(root_pages_raw, root_pages_layout.size()) };
     }
 }
 
