@@ -4,17 +4,6 @@ includes:
 overrides:
   "invocations": 1
 
-modifiers:
-  group_slots:
-    type: ProgramArg
-    val: "--group-slots"
-  threads:
-    type: ProgramArg
-    val: "--log-num-threads {0}"
-  owner_shift:
-    type: ProgramArg
-    val: "--owner-shift {0}"
-
 configs:
   - "native|run_build-hwgc_soft|om-OpenJDK      |subcommand-analyze            |threads-3|owner_shift-10"
   - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze            |threads-3|owner_shift-10"

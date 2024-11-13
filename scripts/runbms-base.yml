@@ -75,6 +75,21 @@ modifiers:
   tl:
     type: ProgramArg
     val: "-t {0}"
+  group_slots:
+    type: ProgramArg
+    val: "--group-slots"
+  rle:
+    type: ProgramArg
+    val: "--rle"
+  eager_load:
+    type: ProgramArg
+    val: "--eager-load"
+  threads:
+    type: ProgramArg
+    val: "--log-num-threads {0}"
+  owner_shift:
+    type: ProgramArg
+    val: "--owner-shift {0}"
 
 runtimes:
   native:
@@ -83,20 +98,20 @@ runtimes:
 benchmarks:
   heapdump:
     - avrora
-    - biojava
-    - cassandra
-    - eclipse
-    - fop
-    - graphchi
-    - h2o
-    - jme
-    - jython
-    - kafka
-    - luindex
-    - lusearch
-    - pmd
-    - spring
-    - sunflow
-    - tradesoap
-    - xalan
-    - zxing
+    # - biojava
+    # - cassandra
+    # - eclipse
+    # - fop
+    # - graphchi
+    # - h2o
+    # - jme
+    # - jython
+    # - kafka
+    # - luindex
+    # - lusearch
+    # - pmd
+    # - spring
+    # - sunflow
+    # - tradesoap
+    # - xalan
+    # - zxing

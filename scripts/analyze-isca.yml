@@ -1,0 +1,25 @@
+# running runbms results ./scripts/analyze-fast.yml -p "pimgc-isca-2025-ablation"
+
+includes:
+  - "./runbms-base.yml"
+
+overrides:
+  "invocations": 1
+
+configs:
+  # One cache line
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-6"
+  # Baseline: ddr3-FRFCFS-16G-4R-2133-OP.conf
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-16"
+  # ddr3-FRFCFS-16G-4R-2133-CP.conf
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-9"
+  # 1 thread
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-0|owner_shift-16"
+  # 2 threads
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-1|owner_shift-16"
+  # 8 threads
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-3|owner_shift-16"
+  # RLE
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-16|rle"
+  # RLE + Eager load
+  - "native|run_build-hwgc_soft|om-Bidirectional|subcommand-analyze|threads-2|owner_shift-16|rle|eager_load"
