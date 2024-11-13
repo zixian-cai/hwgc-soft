@@ -98,20 +98,20 @@ runtimes:
 benchmarks:
   heapdump:
     - avrora
-    # - biojava
-    # - cassandra
-    # - eclipse
-    # - fop
-    # - graphchi
-    # - h2o
-    # - jme
-    # - jython
-    # - kafka
-    # - luindex
-    # - lusearch
-    # - pmd
-    # - spring
-    # - sunflow
-    # - tradesoap
-    # - xalan
-    # - zxing
+    - biojava
+    - cassandra
+    - eclipse
+    - fop
+    - graphchi
+    - h2o
+    - jme
+    - jython
+    - kafka
+    - luindex
+    - lusearch
+    - pmd
+    - spring
+    - sunflow
+    - tradesoap
+    - xalan
+    - zxing
