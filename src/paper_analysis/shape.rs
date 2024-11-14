@@ -87,11 +87,20 @@ fn analyze_benchmark(bm_path: &Path) -> Result<CountMap> {
 }
 
 // RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run --release -- ../heapdumps/sampled -o OpenJDK paper-analyze --analysis-name ShapeDemographic -o shapes.parquet
-pub(super) fn shape_demographic(paths: &[String], analysis_args: PaperAnalysisArgs) -> Result<()> {
+pub(super) fn shape_demographic(
+    paths: &[String],
+    analysis_args: PaperAnalysisArgs,
+    object_model: ObjectModelChoice,
+) -> Result<()> {
     assert_eq!(
         paths.len(),
         1,
         "Should only have one path that is a folder contains subfolders for different benchmarks"
+    );
+    assert!(
+        matches!(object_model, ObjectModelChoice::OpenJDK)
+            || matches!(object_model, ObjectModelChoice::OpenJDKAE),
+        "Only support shape analysis for OpenJDK object model for now"
     );
     let heapdump_path = Path::new(paths.first().unwrap());
     assert!(heapdump_path.is_dir());
