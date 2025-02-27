@@ -109,7 +109,7 @@ def main():
             "Bidirectional",
             "BidirectionalFallback",
         ]
-        tracing_loops = ["EdgeSlot", "EdgeObjref", "NodeObjref"]
+        tracing_loops = ["EdgeSlot", "EdgeObjref", "NodeObjref", "WPEdgeSlot"]
 
         ITERATIONS = "25"
 
@@ -155,8 +155,7 @@ def main():
         for object_model in object_models:
             for tracing_loop in tracing_loops:
                 inputs.append(
-                    ["-i", ITERATIONS, "-o", object_model, "-t", tracing_loop]
-                    + heapdumps
+                    heapdumps + ["-o", object_model, "trace", "-i", ITERATIONS, "-t", tracing_loop]
                 )
         profile_name = f"all_in_one"
         build_pgo(pgo_dir, profile_gen_path, profile_name, inputs)
