@@ -1,0 +1,16 @@
+includes:
+  - "./runbms-base.yml"
+
+modifiers:
+  threads:
+    type: ProgramArg
+    val: "--threads {0}"
+
+configs:
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-EdgeSlot"
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-1"
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-2"
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-4"
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-8"
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-16"
+  - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-32"
