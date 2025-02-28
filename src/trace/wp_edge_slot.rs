@@ -41,10 +41,14 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
         let local = WPWorker::current();
         let mark_state = local.global.mark_state();
         for slot in std::mem::take(&mut self.slots) {
-            local.slots += 1;
+            if cfg!(feature = "detailed_stats") {
+                local.slots += 1;
+            }
             if let Some(o) = slot.load() {
                 if o.mark(mark_state) {
-                    local.objs += 1;
+                    if cfg!(feature = "detailed_stats") {
+                        local.objs += 1;
+                    }
                     o.scan::<O, _>(|s| {
                         if self.next_slots.is_empty() {
                             self.next_slots.reserve(capacity);
@@ -56,7 +60,9 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
                     });
                 }
             } else {
-                local.ne_slots += 1;
+                if cfg!(feature = "detailed_stats") {
+                    local.ne_slots += 1;
+                }
             }
         }
         self.flush(local);
