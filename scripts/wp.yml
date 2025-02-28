@@ -14,3 +14,11 @@ configs:
   - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-8"
   - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-16"
   - "native|run_build-all_in_one|om-OpenJDK|subcommand-trace|tl-WPEdgeSlot|threads-32"
+
+plugins:
+  zulip:
+    type: Zulip
+    request:
+      type: stream
+      to: "running-ng bots"
+      topic: "heapdump wp"
