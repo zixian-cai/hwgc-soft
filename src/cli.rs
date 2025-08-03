@@ -73,7 +73,15 @@ pub enum PaperAnalysisChoice {
 #[derive(Parser, Debug, Clone)]
 pub struct SimulationArgs {
     #[arg(short, long)]
-    pub processes: usize,
+    pub(crate) processors: usize,
+    #[arg(short, long, value_enum)]
+    pub(crate) architecture: SimulationArchitectureChoice,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all = "verbatim")]
+pub enum SimulationArchitectureChoice {
+    IdealTraceUtilization,
 }
 
 #[derive(Subcommand, Debug)]

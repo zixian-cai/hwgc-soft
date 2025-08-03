@@ -1,23 +1,38 @@
-use crate::*;
+use crate::{simulate::ideal_trace_utilization::IdealTraceUtilization, *};
 use anyhow::Result;
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
-struct Simulation {
-    num_processes: usize,
+mod ideal_trace_utilization;
+
+trait SimulationArchitecture {
+    fn tick<O: ObjectModel>(&mut self) -> bool;
+    fn new<O: ObjectModel>(args: &SimulationArgs, object_model: &O) -> Self;
+    fn stats(&self) -> HashMap<String, f64>;
 }
 
-impl Simulation {
-    fn from_args(args: SimulationArgs) -> Self {
+struct Simulation<A: SimulationArchitecture> {
+    architecture: A,
+}
+
+impl<A: SimulationArchitecture> Simulation<A> {
+    fn new<O: ObjectModel>(args: &SimulationArgs, object_model: &O) -> Self {
         Simulation {
-            num_processes: args.processes,
+            architecture: A::new(args, object_model),
         }
     }
 
-    fn run<O: ObjectModel>(&mut self, object_model: &O) {}
+    fn run<O: ObjectModel>(&mut self) {
+        loop {
+            let stop = self.architecture.tick::<O>();
+            if stop {
+                break;
+            }
+        }
+    }
 
-    fn print(&self) {}
-
-    fn reset(&mut self) {}
+    fn stats(&self) -> HashMap<String, f64> {
+        self.architecture.stats()
+    }
 }
 
 pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
@@ -26,7 +41,6 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
     } else {
         panic!("Incorrect dispatch");
     };
-    let mut simuation = Simulation::from_args(simulation_args);
     for path in &args.paths {
         let p: &Path = path.as_ref();
         // Fake a DaCapo iteration for easier parsing
@@ -42,15 +56,37 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
         heapdump.map_spaces()?;
         // write objects to the heap
         object_model.restore_objects(&heapdump);
-        simuation.run(&object_model);
+        let stats = match simulation_args.architecture {
+            SimulationArchitectureChoice::IdealTraceUtilization => {
+                let mut simuation: Simulation<IdealTraceUtilization> =
+                    Simulation::new(&simulation_args, &object_model);
+                simuation.run::<O>();
+                simuation.stats()
+            }
+        };
         let duration = start.elapsed();
         println!(
             "===== DaCapo hwgc-soft {:?} PASSED in {} msec =====",
             p.file_name().unwrap(),
             duration.as_millis()
         );
-        simuation.print();
-        simuation.reset();
+        println!("============================ Tabulate Statistics ============================");
+        let stats_pairs: Vec<(String, f64)> = stats.into_iter().collect();
+        for (i, (key, _)) in stats_pairs.iter().enumerate() {
+            if i > 0 {
+                print!("\t");
+            }
+            print!("{}", key);
+        }
+        println!();
+        for (i, (_, value)) in stats_pairs.iter().enumerate() {
+            if i > 0 {
+                print!("\t");
+            }
+            print!("{:.3}", value);
+        }
+        println!();
+        println!("-------------------------- End Tabulate Statistics --------------------------");
         heapdump.unmap_spaces()?;
     }
     Ok(())

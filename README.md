@@ -16,6 +16,11 @@ And then run `./experiments/heapdumps/sample.py heapdumps/alveo-2024-01-12-Fri-1
 
 To generate the benchmark suite definitions using the heapdumps, run `./scripts/generate_suite_def.py ../heapdumps/sampled/`
 
+## Running event-driven simulation
+```
+RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run -- ../heapdumps/sampled/fop/heapdump.2.binpb.zst -o OpenJDK simulate -p 4 -a IdealTraceUtilization
+```
+
 ## Experiments
 ### PGO and tracing performance
 ```
