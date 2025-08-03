@@ -13,6 +13,7 @@ mod heapdump;
 pub mod m5;
 mod object_model;
 mod paper_analysis;
+mod simulate;
 mod trace;
 mod util;
 
@@ -26,5 +27,6 @@ pub use crate::cli::*;
 pub use crate::heapdump::{HeapDump, HeapObject, RootEdge};
 pub use crate::object_model::{BidirectionalObjectModel, ObjectModel, OpenJDKObjectModel};
 pub use crate::paper_analysis::reified_paper_analysis;
+pub use crate::simulate::reified_simulation;
 pub use crate::trace::reified_trace;
 pub use crate::trace::TracingLoopChoice;

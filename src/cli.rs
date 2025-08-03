@@ -69,10 +69,18 @@ pub enum PaperAnalysisChoice {
     EdgeChunks,
 }
 
+/// Simulation args
+#[derive(Parser, Debug, Clone)]
+pub struct SimulationArgs {
+    #[arg(short, long)]
+    pub processes: usize,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     Trace(TraceArgs),
     Analyze(AnalysisArgs),
     Depth(DepthArgs),
     PaperAnalyze(PaperAnalysisArgs),
+    Simulate(SimulationArgs),
 }
