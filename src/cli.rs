@@ -82,6 +82,7 @@ pub struct SimulationArgs {
 #[clap(rename_all = "verbatim")]
 pub enum SimulationArchitectureChoice {
     IdealTraceUtilization,
+    NMPGC,
 }
 
 #[derive(Subcommand, Debug)]

@@ -1,8 +1,11 @@
-use crate::{simulate::ideal_trace_utilization::IdealTraceUtilization, *};
+use crate::*;
 use anyhow::Result;
 use std::{collections::HashMap, path::Path};
 
 mod ideal_trace_utilization;
+use ideal_trace_utilization::IdealTraceUtilization;
+mod nmpgc;
+use nmpgc::NMPGC;
 
 trait SimulationArchitecture {
     fn tick<O: ObjectModel>(&mut self) -> bool;
@@ -63,6 +66,32 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
                 simuation.run::<O>();
                 simuation.stats()
             }
+            SimulationArchitectureChoice::NMPGC => match simulation_args.processors {
+                1 => {
+                    let mut simuation: Simulation<NMPGC<0>> =
+                        Simulation::new(&simulation_args, &object_model);
+                    simuation.run::<O>();
+                    simuation.stats()
+                }
+                2 => {
+                    let mut simuation: Simulation<NMPGC<1>> =
+                        Simulation::new(&simulation_args, &object_model);
+                    simuation.run::<O>();
+                    simuation.stats()
+                }
+                4 => {
+                    let mut simuation: Simulation<NMPGC<2>> =
+                        Simulation::new(&simulation_args, &object_model);
+                    simuation.run::<O>();
+                    simuation.stats()
+                }
+                _ => {
+                    panic!(
+                        "Unsupported number of processors for NMPGC: {}",
+                        simulation_args.processors
+                    );
+                }
+            },
         };
         let duration = start.elapsed();
         println!(
