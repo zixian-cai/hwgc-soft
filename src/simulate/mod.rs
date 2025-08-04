@@ -6,6 +6,7 @@ mod ideal_trace_utilization;
 use ideal_trace_utilization::IdealTraceUtilization;
 mod nmpgc;
 use nmpgc::NMPGC;
+mod cache;
 
 trait SimulationArchitecture {
     fn tick<O: ObjectModel>(&mut self) -> bool;
