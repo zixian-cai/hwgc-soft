@@ -2,9 +2,12 @@ use super::SimulationArchitecture;
 use crate::{trace::trace_object, *};
 use std::collections::{HashMap, VecDeque};
 
+use super::cache::{DataCache, SetAssociativeCache};
+
 pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
     processors: Vec<NMPProcessor<LOG_NUM_THREADS>>,
     ticks: usize,
+    frequency_ghz: f64,
 }
 
 impl<const LOG_NUM_THREADS: u8> NMPGC<LOG_NUM_THREADS> {
@@ -37,6 +40,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         NMPGC {
             processors,
             ticks: 0,
+            frequency_ghz: 1.0,
         }
     }
 
@@ -65,10 +69,18 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let mut stats = HashMap::new();
         let mut total_marked_objects = 0;
         let mut total_busy_ticks = 0;
+        let mut total_read_hits = 0;
+        let mut total_read_misses = 0;
+        let mut total_write_hits = 0;
+        let mut total_write_misses = 0;
 
         for processor in &self.processors {
             total_marked_objects += processor.marked_objects;
             total_busy_ticks += processor.busy_ticks;
+            total_read_hits += processor.cache.stats.read_hits;
+            total_read_misses += processor.cache.stats.read_misses;
+            total_write_hits += processor.cache.stats.write_hits;
+            total_write_misses += processor.cache.stats.write_misses;
         }
         stats.insert("ticks".into(), self.ticks as f64);
         stats.insert("marked_objects.sum".into(), total_marked_objects as f64);
@@ -77,11 +89,29 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             "utilization".into(),
             total_busy_ticks as f64 / (self.ticks * self.processors.len()) as f64,
         );
+        stats.insert("read_hits.sum".into(), total_read_hits as f64);
+        stats.insert("read_misses.sum".into(), total_read_misses as f64);
+        stats.insert("write_hits.sum".into(), total_write_hits as f64);
+        stats.insert("write_misses.sum".into(), total_write_misses as f64);
+        stats.insert(
+            "read_hit_rate".into(),
+            total_read_hits as f64 / (total_read_hits + total_read_misses) as f64,
+        );
+        stats.insert(
+            "write_hit_rate".into(),
+            total_write_hits as f64 / (total_write_hits + total_write_misses) as f64,
+        );
+        // in ms
+        stats.insert(
+            "time".into(),
+            self.ticks as f64 / (self.frequency_ghz * 1e6),
+        );
+
         stats
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     id: usize,
     ticks: usize, // This is synchronized with the global ticks
@@ -91,6 +121,7 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     works: VecDeque<NMPProcessorWork>,
     stalled_work: Option<NMPProcessorWork>,
     stall_ticks: usize,
+    pub(super) cache: SetAssociativeCache,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +144,8 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             stalled_work: None,
             stall_ticks: 0,
             ticks: 0,
+            // 32 KB
+            cache: SetAssociativeCache::new(64, 8),
         }
     }
     fn tick<O: ObjectModel>(&mut self) -> Option<NMPMessage> {
@@ -166,6 +199,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             NMPProcessorWork::Mark(o) => {
                 trace!("[P{}] marking object {}", self.id, o);
                 if unsafe { trace_object(o, 1) } {
+                    self.cache.write(o);
                     self.marked_objects += 1;
                     O::scan_object(o, |edge, repeat| {
                         for i in 0..repeat {
@@ -178,6 +212,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             }
             NMPProcessorWork::Load(e) => {
                 let child = unsafe { *e };
+                self.cache.read(e as u64);
                 if child != 0 {
                     let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_thread(child);
                     if owner == self.id as u64 {
@@ -225,9 +260,9 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
 
     fn get_latency(&self, work: &NMPProcessorWork) -> usize {
         match work {
-            NMPProcessorWork::Mark(_) => 5,
+            NMPProcessorWork::Mark(o) => self.cache.write_latency(*o),
             NMPProcessorWork::Idle => 1,
-            NMPProcessorWork::Load(_) => 4,
+            NMPProcessorWork::Load(e) => self.cache.read_latency(*e as u64),
             NMPProcessorWork::ReadInbox => 2,
             NMPProcessorWork::SendMessage(_) => 10,
         }

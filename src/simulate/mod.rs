@@ -101,7 +101,8 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
             duration.as_millis()
         );
         println!("============================ Tabulate Statistics ============================");
-        let stats_pairs: Vec<(String, f64)> = stats.into_iter().collect();
+        let mut stats_pairs: Vec<(String, f64)> = stats.into_iter().collect();
+        stats_pairs.sort_by(|a, b| a.0.cmp(&b.0));
         for (i, (key, _)) in stats_pairs.iter().enumerate() {
             if i > 0 {
                 print!("\t");
