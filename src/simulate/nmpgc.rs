@@ -1,5 +1,5 @@
 use super::SimulationArchitecture;
-use crate::{trace::trace_object, *};
+use crate::{simulate::cache::AddressMapping, trace::trace_object, *};
 use std::collections::{HashMap, VecDeque};
 
 use super::cache::{DataCache, SetAssociativeCache};
@@ -12,14 +12,9 @@ pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
 
 impl<const LOG_NUM_THREADS: u8> NMPGC<LOG_NUM_THREADS> {
     const NUM_THREADS: u64 = 1u64 << LOG_NUM_THREADS;
-    #[cfg(not(feature = "close_page"))]
-    const OWNER_SHIFT: u8 = 16;
-    #[cfg(feature = "close_page")]
-    const OWNER_SHIFT: u8 = 9;
-
-    const fn get_owner_thread(o: u64) -> u64 {
-        let mask = (Self::NUM_THREADS - 1) << Self::OWNER_SHIFT;
-        (o & mask) >> Self::OWNER_SHIFT
+    fn get_owner_thread(o: u64) -> u64 {
+        let mapping = AddressMapping(o);
+        mapping.get_owner_thread()
     }
 }
 
@@ -40,7 +35,8 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         NMPGC {
             processors,
             ticks: 0,
-            frequency_ghz: 1.0,
+            // Only valid for DDR4-3200
+            frequency_ghz: 1.6,
         }
     }
 
@@ -75,6 +71,12 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let mut total_write_misses = 0;
 
         for processor in &self.processors {
+            info!("[P{}] marked objects: {}, busy ticks: {}, utilization: {:.3}, read hits: {}, read misses: {}, write hits: {}, write misses: {}",
+                processor.id, processor.marked_objects, processor.busy_ticks,
+                processor.busy_ticks as f64 / self.ticks as f64,
+                processor.cache.stats.read_hits, processor.cache.stats.read_misses,
+                processor.cache.stats.write_hits, processor.cache.stats.write_misses);
+            info!("[P{}] work count: {:?}", processor.id, processor.work_count);
             total_marked_objects += processor.marked_objects;
             total_busy_ticks += processor.busy_ticks;
             total_read_hits += processor.cache.stats.read_hits;
@@ -122,6 +124,7 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     stalled_work: Option<NMPProcessorWork>,
     stall_ticks: usize,
     pub(super) cache: SetAssociativeCache,
+    work_count: HashMap<NMPProcessorWorkType, usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +134,28 @@ enum NMPProcessorWork {
     Idle,
     ReadInbox,
     SendMessage(NMPMessage),
+}
+
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
+enum NMPProcessorWorkType {
+    Mark = 0,
+    Load = 1,
+    Idle = 2,
+    ReadInbox = 3,
+    SendMessage = 4,
+}
+
+impl NMPProcessorWork {
+    fn get_type(&self) -> NMPProcessorWorkType {
+        match self {
+            NMPProcessorWork::Mark(_) => NMPProcessorWorkType::Mark,
+            NMPProcessorWork::Load(_) => NMPProcessorWorkType::Load,
+            NMPProcessorWork::Idle => NMPProcessorWorkType::Idle,
+            NMPProcessorWork::ReadInbox => NMPProcessorWorkType::ReadInbox,
+            NMPProcessorWork::SendMessage(_) => NMPProcessorWorkType::SendMessage,
+        }
+    }
 }
 
 impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
@@ -146,6 +171,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             ticks: 0,
             // 32 KB
             cache: SetAssociativeCache::new(64, 8),
+            work_count: HashMap::new(),
         }
     }
     fn tick<O: ObjectModel>(&mut self) -> Option<NMPMessage> {
@@ -194,7 +220,10 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         }
 
         let mut ret = None;
-
+        self.work_count
+            .entry(work.get_type())
+            .and_modify(|e| *e += 1)
+            .or_insert(1);
         match work {
             NMPProcessorWork::Mark(o) => {
                 trace!("[P{}] marking object {}", self.id, o);

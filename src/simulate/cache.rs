@@ -1,6 +1,7 @@
-use std::{fmt::Debug, num::NonZeroUsize};
-
+use bitfield::bitfield;
 use lru::LruCache;
+use std::fmt::Debug;
+use std::num::NonZeroUsize;
 
 /// Assumes reading word-aligned words
 pub(super) trait DataCache {
@@ -30,13 +31,13 @@ pub(super) struct CacheStats {
 }
 
 pub(super) struct FullyAssociativeCache {
-    cache: LruCache<u64, ()>, // We don't actually care about the content, just what's in the cache
+    cache: LruCache<u64, ()>, // We don't actually care about the content, just what's in the cache,
+    rank: DDR4Rank,
     pub(super) stats: CacheStats,
 }
 
 impl FullyAssociativeCache {
     const HIT_LATENCY: usize = 4;
-    const MISS_LATENCY: usize = 50;
 
     pub fn new(capacity: usize) -> Self {
         assert!(
@@ -46,6 +47,7 @@ impl FullyAssociativeCache {
         FullyAssociativeCache {
             cache: LruCache::new(NonZeroUsize::new(capacity / LINE_SIZE).unwrap()),
             stats: CacheStats::default(),
+            rank: DDR4Rank::default(),
         }
     }
 }
@@ -59,7 +61,7 @@ impl DataCache for FullyAssociativeCache {
         } else {
             self.cache.put(line, ());
             self.stats.read_misses += 1;
-            Self::MISS_LATENCY
+            self.rank.transaction(addr)
         }
     }
 
@@ -71,7 +73,7 @@ impl DataCache for FullyAssociativeCache {
         } else {
             self.cache.put(line, ());
             self.stats.write_misses += 1;
-            Self::MISS_LATENCY
+            self.rank.transaction(addr)
         }
     }
 
@@ -79,7 +81,7 @@ impl DataCache for FullyAssociativeCache {
         if self.cache.contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            Self::MISS_LATENCY
+            self.rank.transaction_latency(addr)
         }
     }
 
@@ -87,7 +89,7 @@ impl DataCache for FullyAssociativeCache {
         if self.cache.contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            Self::MISS_LATENCY
+            self.rank.transaction_latency(addr)
         }
     }
 }
@@ -95,6 +97,7 @@ impl DataCache for FullyAssociativeCache {
 #[derive(Clone)]
 pub(super) struct SetAssociativeCache {
     cache_sets: Vec<LruCache<u64, ()>>,
+    rank: DDR4Rank,
     pub(super) stats: CacheStats,
 }
 
@@ -111,7 +114,6 @@ impl Debug for SetAssociativeCache {
 
 impl SetAssociativeCache {
     const HIT_LATENCY: usize = 4;
-    const MISS_LATENCY: usize = 50;
 
     pub fn new(num_sets: usize, num_ways: usize) -> Self {
         assert!(
@@ -124,6 +126,7 @@ impl SetAssociativeCache {
         SetAssociativeCache {
             cache_sets,
             stats: CacheStats::default(),
+            rank: DDR4Rank::default(),
         }
     }
 
@@ -143,7 +146,7 @@ impl DataCache for SetAssociativeCache {
         } else {
             self.cache_sets[set_idx].put(line, ());
             self.stats.read_misses += 1;
-            Self::MISS_LATENCY
+            self.rank.transaction(addr)
         }
     }
 
@@ -156,7 +159,7 @@ impl DataCache for SetAssociativeCache {
         } else {
             self.cache_sets[set_idx].put(line, ());
             self.stats.write_misses += 1;
-            Self::MISS_LATENCY
+            self.rank.transaction(addr)
         }
     }
 
@@ -165,7 +168,7 @@ impl DataCache for SetAssociativeCache {
         if self.cache_sets[set_idx].contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            Self::MISS_LATENCY
+            self.rank.transaction_latency(addr)
         }
     }
 
@@ -174,8 +177,77 @@ impl DataCache for SetAssociativeCache {
         if self.cache_sets[set_idx].contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            Self::MISS_LATENCY
+            self.rank.transaction_latency(addr)
         }
+    }
+}
+
+// dual channel, quad rank,
+// 1024 Meg * 8, 8 GB per rank
+// 64 GB system (4 DIMMs in two channels, 2 ranks per DIMM)
+// A particular bank is 65536x128x64 (each column has 8 bits, and reads in bursts of 8)
+// So when you read a cache line, you are implictly changing the lower 3 bits of the column address
+// row     rank     bank   channel col    blkoffset
+// [35:20] [19:18] [17:14] [13:13] [12:6] [5:0]
+bitfield! {
+    pub struct AddressMapping(u64);
+    impl Debug;
+    pub u8, blkoffset, set_blkoffset: 5, 0;
+    pub u8, col, set_col: 12, 6;
+    pub u8, channel, set_channel: 13, 13;
+    pub u8, bank, set_bank: 17, 14;
+    pub u8, rank, set_rank: 19, 18;
+    pub u16, row, set_row: 35, 20;
+    pub u32, rest, set_rest: 63, 36;
+}
+
+impl AddressMapping {
+    pub(super) fn get_owner_thread(&self) -> u64 {
+        ((self.rank() << 1) | self.channel()) as u64
+    }
+}
+
+#[derive(Clone, Default)]
+struct BankState {
+    current_row: Option<u16>,
+}
+
+impl BankState {
+    fn transaction(&mut self, addr: u64) {
+        let mapping = AddressMapping(addr);
+        self.current_row = Some(mapping.row());
+    }
+
+    fn transaction_latency(&self, addr: u64) -> usize {
+        let mapping = AddressMapping(addr);
+        if self.current_row.is_none() || self.current_row.unwrap() != mapping.row() {
+            // DDR4-3200 Speed Bin -062Y
+            // https://www.mouser.com/datasheet/2/671/Micron_05092023_8gb_ddr4_sdram-3175546.pdf
+            //  tRP + tRCD + tCAS + 4 (double data rate, and burst of 8)
+            22 + 22 + 22 + 4
+        } else {
+            // tCAS + 4 (double data rate, and burst of 8)
+            22 + 4
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct DDR4Rank {
+    banks: [BankState; 16], // 16 banks per rank
+}
+
+impl DDR4Rank {
+    fn transaction(&mut self, addr: u64) -> usize {
+        let mapping = AddressMapping(addr);
+        let latency = self.transaction_latency(addr);
+        self.banks[mapping.bank() as usize].transaction(addr);
+        latency
+    }
+
+    fn transaction_latency(&self, addr: u64) -> usize {
+        let mapping = AddressMapping(addr);
+        self.banks[mapping.bank() as usize].transaction_latency(addr)
     }
 }
 
@@ -186,12 +258,12 @@ mod tests {
     #[test]
     fn test_fully_associative_cache() {
         let mut cache = FullyAssociativeCache::new(64); // 64 B cache
-        assert_eq!(cache.read(0x1000), FullyAssociativeCache::MISS_LATENCY);
+        assert!(cache.read(0x1000) > FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.write(0x1000), FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(0x1000), FullyAssociativeCache::HIT_LATENCY);
-        assert_eq!(cache.read(0x2000), FullyAssociativeCache::MISS_LATENCY);
+        assert!(cache.read(0x2000) > FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.write(0x2000), FullyAssociativeCache::HIT_LATENCY);
-        assert_eq!(cache.read(0x1000), FullyAssociativeCache::MISS_LATENCY);
+        assert!(cache.read(0x1000) > FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.stats.read_hits, 1);
         assert_eq!(cache.stats.read_misses, 3);
         assert_eq!(cache.stats.write_hits, 2);
@@ -201,13 +273,13 @@ mod tests {
     #[test]
     fn test_set_associative_cache() {
         let mut cache = SetAssociativeCache::new(2, 1); // 2 sets, 1 way each
-        assert_eq!(cache.read(0), SetAssociativeCache::MISS_LATENCY);
+        assert!(cache.read(0) > SetAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(0), SetAssociativeCache::HIT_LATENCY);
-        assert_eq!(cache.read(64), SetAssociativeCache::MISS_LATENCY);
+        assert!(cache.read(64) > SetAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(64), SetAssociativeCache::HIT_LATENCY);
-        assert_eq!(cache.read(128), SetAssociativeCache::MISS_LATENCY);
+        assert!(cache.read(128) > SetAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(128), SetAssociativeCache::HIT_LATENCY);
-        assert_eq!(cache.read(0), SetAssociativeCache::MISS_LATENCY);
+        assert!(cache.read(0) > SetAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(64), SetAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.stats.read_hits, 4);
         assert_eq!(cache.stats.read_misses, 4);

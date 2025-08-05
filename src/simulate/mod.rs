@@ -68,20 +68,8 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
                 simuation.stats()
             }
             SimulationArchitectureChoice::NMPGC => match simulation_args.processors {
-                1 => {
-                    let mut simuation: Simulation<NMPGC<0>> =
-                        Simulation::new(&simulation_args, &object_model);
-                    simuation.run::<O>();
-                    simuation.stats()
-                }
-                2 => {
-                    let mut simuation: Simulation<NMPGC<1>> =
-                        Simulation::new(&simulation_args, &object_model);
-                    simuation.run::<O>();
-                    simuation.stats()
-                }
-                4 => {
-                    let mut simuation: Simulation<NMPGC<2>> =
+                8 => {
+                    let mut simuation: Simulation<NMPGC<3>> =
                         Simulation::new(&simulation_args, &object_model);
                     simuation.run::<O>();
                     simuation.stats()
