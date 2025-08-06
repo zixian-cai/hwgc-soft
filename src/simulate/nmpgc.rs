@@ -233,8 +233,16 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     O::scan_object(o, |edge, repeat| {
                         for i in 0..repeat {
                             let e = edge.wrapping_add(i as usize);
-                            // FIXME: if we can't load this edge ourselves, generate a send edge work
-                            self.works.push_back(NMPProcessorWork::Load(e));
+                            let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_thread(e as u64);
+                            if owner == self.id as u64 {
+                                self.works.push_back(NMPProcessorWork::Load(e));
+                            } else {
+                                self.works
+                                    .push_back(NMPProcessorWork::SendMessage(NMPMessage {
+                                        recipient: owner,
+                                        work: NMPMessageWork::Load(e),
+                                    }));
+                            }
                         }
                     });
                 }
@@ -249,7 +257,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     } else {
                         let msg = NMPMessage {
                             recipient: owner as u64,
-                            object: child,
+                            work: NMPMessageWork::Mark(child),
                         };
                         self.works.push_back(NMPProcessorWork::SendMessage(msg));
                     }
@@ -265,14 +273,21 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     "[P{}] sending message to P{}: {:?}",
                     self.id,
                     msg.recipient,
-                    msg.object
+                    msg.work
                 );
                 ret = Some(msg);
             }
             NMPProcessorWork::ReadInbox => {
                 if let Some(msg) = self.inbox.pop() {
                     trace!("[P{}] reading inbox message: {:?}", self.id, msg);
-                    self.works.push_back(NMPProcessorWork::Mark(msg.object));
+                    match msg.work {
+                        NMPMessageWork::Load(e) => {
+                            self.works.push_back(NMPProcessorWork::Load(e));
+                        }
+                        NMPMessageWork::Mark(o) => {
+                            self.works.push_back(NMPProcessorWork::Mark(o));
+                        }
+                    }
                 }
             }
         }
@@ -306,5 +321,11 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
 /// Each processor generates at most one message per tick
 struct NMPMessage {
     recipient: u64,
-    object: u64,
+    work: NMPMessageWork,
+}
+
+#[derive(Debug, Clone)]
+enum NMPMessageWork {
+    Mark(u64),
+    Load(*mut u64),
 }

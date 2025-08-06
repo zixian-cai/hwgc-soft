@@ -4,6 +4,9 @@ use std::fmt::Debug;
 use std::num::NonZeroUsize;
 
 /// Assumes reading word-aligned words
+// FIXME: the memory model requires physical addresses, but right now the
+// heapdumps feed virtual addresses, and the higher bits are ignored.
+// This messes with the row conflict modelling.
 pub(super) trait DataCache {
     /// Reads a word from the cache, returning the latency.
     fn read(&mut self, addr: u64) -> usize;
