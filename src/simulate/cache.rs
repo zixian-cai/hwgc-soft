@@ -286,4 +286,24 @@ mod tests {
         assert_eq!(cache.stats.write_hits, 0);
         assert_eq!(cache.stats.write_misses, 0);
     }
+
+    #[test]
+    fn test_bank_state() {
+        let mut bank_state = BankState::default();
+        let addr = 0b0_0_0000000_000000;
+        assert_eq!(bank_state.transaction_latency(addr), 22 + 22 + 22 + 4);
+        bank_state.transaction(addr);
+        assert_eq!(bank_state.current_row, Some(0));
+        assert_eq!(bank_state.transaction_latency(addr), 22 + 4);
+        // Differnt row
+        let addr = 0b1_00_0000_0_0000000_000000;
+        assert_eq!(bank_state.transaction_latency(addr), 22 + 22 + 22 + 4);
+        bank_state.transaction(addr);
+        assert_eq!(bank_state.current_row, Some(1));
+        assert_eq!(bank_state.transaction_latency(addr), 22 + 4);
+        let addr = 0b0_0_0000000_000000;
+        assert_eq!(bank_state.transaction_latency(addr), 22 + 22 + 22 + 4);
+        let addr = 0b1_00_0000_0_0000001_000000;
+        assert_eq!(bank_state.transaction_latency(addr), 22 + 4);
+    }
 }
