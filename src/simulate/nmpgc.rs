@@ -1,8 +1,10 @@
 use super::SimulationArchitecture;
-use crate::{simulate::cache::AddressMapping, trace::trace_object, *};
+use crate::simulate::memory::RankID;
+use crate::{simulate::memory::AddressMapping, trace::trace_object, *};
 use std::collections::{HashMap, VecDeque};
 
-use super::cache::{DataCache, SetAssociativeCache};
+use super::memory::{DataCache, SetAssociativeCache};
+use super::tracing::TracingEvent;
 
 pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
     processors: Vec<NMPProcessor<LOG_NUM_THREADS>>,
@@ -12,9 +14,9 @@ pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
 
 impl<const LOG_NUM_THREADS: u8> NMPGC<LOG_NUM_THREADS> {
     const NUM_THREADS: u64 = 1u64 << LOG_NUM_THREADS;
-    fn get_owner_thread(o: u64) -> u64 {
+    fn get_owner_processor(o: u64) -> usize {
         let mapping = AddressMapping(o);
-        mapping.get_owner_thread()
+        mapping.get_owner_id()
     }
 }
 
@@ -27,10 +29,8 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         for root in object_model.roots() {
             let o = *root;
             debug_assert_ne!(o, 0);
-            let owner = Self::get_owner_thread(o);
-            processors[owner as usize]
-                .works
-                .push_back(NMPProcessorWork::Mark(o));
+            let owner = Self::get_owner_processor(o);
+            processors[owner].works.push_back(NMPProcessorWork::Mark(o));
         }
         NMPGC {
             processors,
@@ -52,7 +52,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         }
         // Propagate messages
         for m in messages {
-            self.processors[m.recipient as usize].inbox.push(m);
+            self.processors[m.recipient].inbox.push(m);
         }
         // Check if all processors are done
         // FIXME: this assumes magical global knowledge, but
@@ -110,6 +110,10 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         );
 
         stats
+    }
+
+    fn events(&self) -> Vec<simulate::tracing::TracingEvent> {
+        self.processors.iter().flat_map(|p| p.events()).collect()
     }
 }
 
@@ -233,8 +237,8 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     O::scan_object(o, |edge, repeat| {
                         for i in 0..repeat {
                             let e = edge.wrapping_add(i as usize);
-                            let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_thread(e as u64);
-                            if owner == self.id as u64 {
+                            let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(e as u64);
+                            if owner == self.id {
                                 self.works.push_back(NMPProcessorWork::Load(e));
                             } else {
                                 self.works
@@ -251,12 +255,12 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 let child = unsafe { *e };
                 self.cache.read(e as u64);
                 if child != 0 {
-                    let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_thread(child);
-                    if owner == self.id as u64 {
+                    let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(child);
+                    if owner == self.id {
                         self.works.push_back(NMPProcessorWork::Mark(child));
                     } else {
                         let msg = NMPMessage {
-                            recipient: owner as u64,
+                            recipient: owner,
                             work: NMPMessageWork::Mark(child),
                         };
                         self.works.push_back(NMPProcessorWork::SendMessage(msg));
@@ -315,12 +319,22 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
     fn locally_done(&self) -> bool {
         self.works.is_empty() && self.stalled_work.is_none() && self.inbox.is_empty()
     }
+
+    fn to_thread_name_event(&self) -> TracingEvent {
+        TracingEvent::new_threadname_event(0, self.id as u32, RankID(self.id as u8).to_string())
+    }
+
+    fn events(&self) -> Vec<TracingEvent> {
+        let mut events = Vec::new();
+        events.push(self.to_thread_name_event());
+        events
+    }
 }
 
 #[derive(Debug, Clone)]
 /// Each processor generates at most one message per tick
 struct NMPMessage {
-    recipient: u64,
+    recipient: usize,
     work: NMPMessageWork,
 }
 

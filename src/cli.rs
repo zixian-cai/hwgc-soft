@@ -76,6 +76,8 @@ pub struct SimulationArgs {
     pub(crate) processors: usize,
     #[arg(short, long, value_enum)]
     pub(crate) architecture: SimulationArchitectureChoice,
+    #[arg(short, long)]
+    pub(crate) trace_path: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]

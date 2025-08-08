@@ -1,4 +1,4 @@
-use crate::*;
+use crate::{simulate::tracing::serialize_to_gzip_json, *};
 use anyhow::Result;
 use std::{collections::HashMap, path::Path};
 
@@ -6,12 +6,16 @@ mod ideal_trace_utilization;
 use ideal_trace_utilization::IdealTraceUtilization;
 mod nmpgc;
 use nmpgc::NMPGC;
-mod cache;
+mod memory;
+mod tracing;
 
 trait SimulationArchitecture {
     fn tick<O: ObjectModel>(&mut self) -> bool;
     fn new<O: ObjectModel>(args: &SimulationArgs, object_model: &O) -> Self;
     fn stats(&self) -> HashMap<String, f64>;
+    fn events(&self) -> Vec<tracing::TracingEvent> {
+        vec![]
+    }
 }
 
 struct Simulation<A: SimulationArchitecture> {
@@ -37,6 +41,10 @@ impl<A: SimulationArchitecture> Simulation<A> {
     fn stats(&self) -> HashMap<String, f64> {
         self.architecture.stats()
     }
+
+    fn events(&self) -> Vec<tracing::TracingEvent> {
+        self.architecture.events()
+    }
 }
 
 pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
@@ -60,19 +68,19 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
         heapdump.map_spaces()?;
         // write objects to the heap
         object_model.restore_objects(&heapdump);
-        let stats = match simulation_args.architecture {
+        let (stats, events) = match simulation_args.architecture {
             SimulationArchitectureChoice::IdealTraceUtilization => {
                 let mut simuation: Simulation<IdealTraceUtilization> =
                     Simulation::new(&simulation_args, &object_model);
                 simuation.run::<O>();
-                simuation.stats()
+                (simuation.stats(), simuation.events())
             }
             SimulationArchitectureChoice::NMPGC => match simulation_args.processors {
                 8 => {
-                    let mut simuation: Simulation<NMPGC<3>> =
+                    let mut simulation: Simulation<NMPGC<3>> =
                         Simulation::new(&simulation_args, &object_model);
-                    simuation.run::<O>();
-                    simuation.stats()
+                    simulation.run::<O>();
+                    (simulation.stats(), simulation.events())
                 }
                 _ => {
                     panic!(
@@ -106,6 +114,9 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
         }
         println!();
         println!("-------------------------- End Tabulate Statistics --------------------------");
+        if let Some(ref p) = simulation_args.trace_path {
+            serialize_to_gzip_json(&events, p)?;
+        }
         heapdump.unmap_spaces()?;
     }
     Ok(())

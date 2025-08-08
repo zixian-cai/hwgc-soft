@@ -1,6 +1,8 @@
 use bitfield::bitfield;
 use lru::LruCache;
-use std::fmt::Debug;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::fmt::{Debug, Display};
 use std::num::NonZeroUsize;
 
 /// Assumes reading word-aligned words
@@ -33,6 +35,7 @@ pub(super) struct CacheStats {
     pub(super) write_misses: usize,
 }
 
+#[allow(dead_code)]
 pub(super) struct FullyAssociativeCache {
     cache: LruCache<u64, ()>, // We don't actually care about the content, just what's in the cache,
     rank: DDR4Rank,
@@ -58,7 +61,7 @@ impl FullyAssociativeCache {
 impl DataCache for FullyAssociativeCache {
     fn read(&mut self, addr: u64) -> usize {
         let line = addr_to_line(addr);
-        if let Some(_) = self.cache.get(&line) {
+        if self.cache.get(&line).is_some() {
             self.stats.read_hits += 1;
             Self::HIT_LATENCY
         } else {
@@ -70,7 +73,7 @@ impl DataCache for FullyAssociativeCache {
 
     fn write(&mut self, addr: u64) -> usize {
         let line = addr_to_line(addr);
-        if let Some(_) = self.cache.get(&line) {
+        if self.cache.get(&line).is_some() {
             self.stats.write_hits += 1;
             Self::HIT_LATENCY
         } else {
@@ -143,7 +146,7 @@ impl DataCache for SetAssociativeCache {
     fn read(&mut self, addr: u64) -> usize {
         let set_idx = self.get_set_idx(addr);
         let line = addr_to_line(addr);
-        if let Some(_) = self.cache_sets[set_idx].get(&line) {
+        if self.cache_sets[set_idx].get(&line).is_some() {
             self.stats.read_hits += 1;
             Self::HIT_LATENCY
         } else {
@@ -156,7 +159,7 @@ impl DataCache for SetAssociativeCache {
     fn write(&mut self, addr: u64) -> usize {
         let set_idx = self.get_set_idx(addr);
         let line = addr_to_line(addr);
-        if let Some(_) = self.cache_sets[set_idx].get(&line) {
+        if self.cache_sets[set_idx].get(&line).is_some() {
             self.stats.write_hits += 1;
             Self::HIT_LATENCY
         } else {
@@ -185,7 +188,7 @@ impl DataCache for SetAssociativeCache {
     }
 }
 
-// dual channel, quad rank,
+// dual channel, 8 ranks,
 // 1024 Meg * 8, 8 GB per rank
 // 64 GB system (4 DIMMs in two channels, 2 ranks per DIMM)
 // A particular bank is 65536x128x64 (each column has 8 bits, and reads in bursts of 8)
@@ -199,14 +202,45 @@ bitfield! {
     pub u8, col, set_col: 12, 6;
     pub u8, channel, set_channel: 13, 13;
     pub u8, bank, set_bank: 17, 14;
-    pub u8, rank, set_rank: 19, 18;
+    pub u8, dimm, set_dimm: 18, 18;
+    pub u8, rank, set_rank: 19, 19;
     pub u16, row, set_row: 35, 20;
     pub u32, rest, set_rest: 63, 36;
 }
 
 impl AddressMapping {
-    pub(super) fn get_owner_thread(&self) -> u64 {
-        ((self.rank() << 1) | self.channel()) as u64
+    /// Returns the owner thread ID based on the channel and rank.
+    /// This needs to be consistent with the TopologyLocation encoding.
+    pub(super) fn get_owner_id(&self) -> usize {
+        let mut rank_id = RankID(0);
+        rank_id.set_channel(self.channel());
+        rank_id.set_dimm(self.dimm());
+        rank_id.set_rank(self.rank());
+        rank_id.0 as usize
+    }
+}
+
+bitfield! {
+    pub struct RankID(u8);
+    impl Debug;
+    pub u8, channel, set_channel: 0, 0;
+    pub u8, dimm, set_dimm: 1, 1;
+    pub u8, rank, set_rank: 2, 2;
+}
+
+impl Display for RankID {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "C{}-D{}-R{}", self.channel(), self.dimm(), self.rank())
+    }
+}
+
+impl RankID {
+    pub(crate) fn to_dict(&self) -> HashMap<String, Value> {
+        let mut dict = HashMap::new();
+        dict.insert("channel".to_string(), json!(self.channel()));
+        dict.insert("dimm".to_string(), json!(self.dimm()));
+        dict.insert("rank".to_string(), json!(self.rank()));
+        dict
     }
 }
 
