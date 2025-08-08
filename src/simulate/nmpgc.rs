@@ -1,5 +1,8 @@
+use polars::time;
+
 use super::SimulationArchitecture;
 use crate::simulate::memory::RankID;
+use crate::simulate::tracing::InstantEventScope;
 use crate::{simulate::memory::AddressMapping, trace::trace_object, *};
 use std::collections::{HashMap, VecDeque};
 
@@ -129,6 +132,9 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     stall_ticks: usize,
     pub(super) cache: SetAssociativeCache,
     work_count: HashMap<NMPProcessorWorkType, usize>,
+    idle_ranges: Vec<(usize, usize)>,
+    idle_start: Option<usize>,
+    frequency_ghz: f64, // Only valid for DDR4-3200
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +182,9 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             // 32 KB
             cache: SetAssociativeCache::new(64, 8),
             work_count: HashMap::new(),
+            idle_ranges: vec![],
+            idle_start: None,
+            frequency_ghz: 1.6,
         }
     }
     fn tick<O: ObjectModel>(&mut self) -> Option<NMPMessage> {
@@ -221,6 +230,14 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
 
         if !matches!(work, NMPProcessorWork::Idle) {
             self.busy_ticks += 1;
+        }
+
+        if !(matches!(work, NMPProcessorWork::Idle) || matches!(work, NMPProcessorWork::ReadInbox))
+        {
+            // This processor is doing productive work now
+            if let Some(start) = self.idle_start.take() {
+                self.idle_ranges.push((start, self.ticks - 1));
+            }
         }
 
         let mut ret = None;
@@ -270,6 +287,11 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             NMPProcessorWork::Idle => {
                 if !self.inbox.is_empty() {
                     self.works.push_back(NMPProcessorWork::ReadInbox);
+                } else {
+                    // This process is truly idle
+                    if self.idle_start.is_none() {
+                        self.idle_start = Some(self.ticks);
+                    }
                 }
             }
             NMPProcessorWork::SendMessage(msg) => {
@@ -327,6 +349,65 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
     fn events(&self) -> Vec<TracingEvent> {
         let mut events = Vec::new();
         events.push(self.to_thread_name_event());
+        let mut timestamp_cursor: usize = 0;
+
+        for (begin, end) in &self.idle_ranges {
+            if *begin > timestamp_cursor {
+                events.push(TracingEvent::new_duration_event(
+                    0,
+                    self.id as u32,
+                    "busy".to_string(),
+                    timestamp_cursor as u64,
+                    HashMap::default(),
+                    true,
+                    None,
+                ));
+                events.push(TracingEvent::new_duration_event(
+                    0,
+                    self.id as u32,
+                    "busy".to_string(),
+                    (*begin - 1) as u64,
+                    HashMap::default(),
+                    false,
+                    None,
+                ));
+            }
+            events.push(TracingEvent::new_duration_event(
+                0,
+                self.id as u32,
+                "idle".to_string(),
+                *begin as u64,
+                HashMap::default(),
+                true,
+                None,
+            ));
+            events.push(TracingEvent::new_duration_event(
+                0,
+                self.id as u32,
+                "idle".to_string(),
+                *end as u64,
+                HashMap::default(),
+                false,
+                None,
+            ));
+            timestamp_cursor = *end + 1;
+        }
+        events.push(TracingEvent::new_instant_event(
+            0,
+            self.id as u32,
+            "Start".to_string(),
+            0,
+            HashMap::default(),
+            InstantEventScope::Thread,
+        ));
+        events.push(TracingEvent::new_instant_event(
+            0,
+            self.id as u32,
+            "Stop".to_string(),
+            self.ticks as u64,
+            HashMap::default(),
+            InstantEventScope::Thread,
+        ));
         events
     }
 }
