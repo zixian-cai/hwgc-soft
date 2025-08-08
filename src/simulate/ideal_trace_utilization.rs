@@ -68,7 +68,7 @@ impl ITUProcessor {
         }
     }
     fn tick<O: ObjectModel>(&mut self, o: Option<u64>) -> Vec<u64> {
-        if let None = o {
+        if o.is_none() {
             return vec![];
         }
         let o = o.unwrap();

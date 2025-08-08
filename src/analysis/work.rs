@@ -281,7 +281,7 @@ impl super::Analysis {
                 // We need to send out more messages
                 let leftover = repeat - ptrs_fit_in_1st_stride as u64;
                 // divide and round up
-                let leftover_strides = (leftover + (ptr_in_stide - 1)) / ptr_in_stide;
+                let leftover_strides = leftover.div_ceil(ptr_in_stide);
                 // dbg!(leftover_strides);
                 debug_assert!(leftover_strides >= 1);
                 for i in edge_owner + 1

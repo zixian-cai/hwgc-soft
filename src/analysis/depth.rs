@@ -53,7 +53,7 @@ pub fn object_depth<O: ObjectModel>(mut object_model: O, args: Args) -> Result<(
             "depth" => depth_vec,
             "counts" => count_vec
         }?;
-        let iteration_series: Series = iter::repeat(i as u64).take(df.height()).collect();
+        let iteration_series: Series = iter::repeat_n(i as u64, df.height()).collect();
         df.with_column(Series::new("iteration", iteration_series))?;
         dfs.push(df);
         heapdump.unmap_spaces()?;

@@ -155,6 +155,6 @@ impl AnalysisStats {
             self.total_msgs,
             self.msg_process_edge + self.msg_process_edges + self.msg_process_node
         );
-        debug_assert_eq!(self.total_work, self.work_dist.values().sum());
+        debug_assert_eq!(self.total_work, self.work_dist.values().sum::<u64>());
     }
 }
