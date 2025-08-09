@@ -35,3 +35,7 @@ pub fn dzmmap_noreplace(start: u64, size: usize) -> Result<()> {
 
     mmap_fixed(start, size, prot, flags)
 }
+
+pub fn ticks_to_us(ticks: u64, frequency_ghz: f64) -> f64 {
+    (ticks as f64) / (frequency_ghz * 1000.0)
+}

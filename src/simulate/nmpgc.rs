@@ -3,6 +3,7 @@ use polars::time;
 use super::SimulationArchitecture;
 use crate::simulate::memory::RankID;
 use crate::simulate::tracing::InstantEventScope;
+use crate::util::ticks_to_us;
 use crate::{simulate::memory::AddressMapping, trace::trace_object, *};
 use std::collections::{HashMap, VecDeque};
 
@@ -74,11 +75,12 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let mut total_write_misses = 0;
 
         for processor in &self.processors {
-            info!("[P{}] marked objects: {}, busy ticks: {}, utilization: {:.3}, read hits: {}, read misses: {}, write hits: {}, write misses: {}",
+            info!("[P{}] marked objects: {}, busy ticks: {}, utilization: {:.3}, read hits: {}, read misses: {}, write hits: {}, write misses: {}, idle -> read inbox: {}",
                 processor.id, processor.marked_objects, processor.busy_ticks,
                 processor.busy_ticks as f64 / self.ticks as f64,
                 processor.cache.stats.read_hits, processor.cache.stats.read_misses,
-                processor.cache.stats.write_hits, processor.cache.stats.write_misses);
+                processor.cache.stats.write_hits, processor.cache.stats.write_misses,
+            processor.idle_readinbox_ticks);
             info!("[P{}] work count: {:?}", processor.id, processor.work_count);
             total_marked_objects += processor.marked_objects;
             total_busy_ticks += processor.busy_ticks;
@@ -125,6 +127,7 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     id: usize,
     ticks: usize, // This is synchronized with the global ticks
     busy_ticks: usize,
+    idle_readinbox_ticks: usize,
     marked_objects: usize,
     inbox: Vec<NMPMessage>,
     works: VecDeque<NMPProcessorWork>,
@@ -185,6 +188,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             idle_ranges: vec![],
             idle_start: None,
             frequency_ghz: 1.6,
+            idle_readinbox_ticks: 0,
         }
     }
     fn tick<O: ObjectModel>(&mut self) -> Option<NMPMessage> {
@@ -286,6 +290,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             }
             NMPProcessorWork::Idle => {
                 if !self.inbox.is_empty() {
+                    self.idle_readinbox_ticks += 1;
                     self.works.push_back(NMPProcessorWork::ReadInbox);
                 } else {
                     // This process is truly idle
@@ -350,14 +355,17 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         let mut events = Vec::new();
         events.push(self.to_thread_name_event());
         let mut timestamp_cursor: usize = 0;
-
-        for (begin, end) in &self.idle_ranges {
+        let mut idle_ranges = self.idle_ranges.clone();
+        if let Some(start) = self.idle_start {
+            idle_ranges.push((start, self.ticks));
+        }
+        for (begin, end) in &idle_ranges {
             if *begin > timestamp_cursor {
                 events.push(TracingEvent::new_duration_event(
                     0,
                     self.id as u32,
                     "busy".to_string(),
-                    timestamp_cursor as u64,
+                    ticks_to_us(timestamp_cursor as u64, self.frequency_ghz),
                     HashMap::default(),
                     true,
                     None,
@@ -366,7 +374,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     0,
                     self.id as u32,
                     "busy".to_string(),
-                    (*begin - 1) as u64,
+                    ticks_to_us(((*begin) - 1) as u64, self.frequency_ghz),
                     HashMap::default(),
                     false,
                     None,
@@ -376,7 +384,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 0,
                 self.id as u32,
                 "idle".to_string(),
-                *begin as u64,
+                ticks_to_us(*begin as u64, self.frequency_ghz),
                 HashMap::default(),
                 true,
                 None,
@@ -385,29 +393,53 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 0,
                 self.id as u32,
                 "idle".to_string(),
-                *end as u64,
+                ticks_to_us(*end as u64, self.frequency_ghz),
                 HashMap::default(),
                 false,
                 None,
             ));
             timestamp_cursor = *end + 1;
         }
-        events.push(TracingEvent::new_instant_event(
-            0,
-            self.id as u32,
-            "Start".to_string(),
-            0,
-            HashMap::default(),
-            InstantEventScope::Thread,
-        ));
-        events.push(TracingEvent::new_instant_event(
-            0,
-            self.id as u32,
-            "Stop".to_string(),
-            self.ticks as u64,
-            HashMap::default(),
-            InstantEventScope::Thread,
-        ));
+
+        // If the last idle range does not cover the end of the ticks, we add a busy event
+        if timestamp_cursor < self.ticks {
+            events.push(TracingEvent::new_duration_event(
+                0,
+                self.id as u32,
+                "busy".to_string(),
+                ticks_to_us(timestamp_cursor as u64, self.frequency_ghz),
+                HashMap::default(),
+                true,
+                None,
+            ));
+            events.push(TracingEvent::new_duration_event(
+                0,
+                self.id as u32,
+                "busy".to_string(),
+                ticks_to_us(self.ticks as u64, self.frequency_ghz),
+                HashMap::default(),
+                false,
+                None,
+            ));
+        }
+
+        // These cause json_parser_error in Perfetto
+        // events.push(TracingEvent::new_instant_event(
+        //     0,
+        //     self.id as u32,
+        //     "Start".to_string(),
+        //     0.0,
+        //     HashMap::default(),
+        //     InstantEventScope::Thread,
+        // ));
+        // events.push(TracingEvent::new_instant_event(
+        //     0,
+        //     self.id as u32,
+        //     "Stop".to_string(),
+        //     ticks_to_us(self.ticks as u64, self.frequency_ghz),
+        //     HashMap::default(),
+        //     InstantEventScope::Thread,
+        // ));
         events
     }
 }

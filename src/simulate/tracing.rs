@@ -15,11 +15,14 @@ pub(crate) enum InstantEventScope {
 pub(crate) struct TracingEvent {
     pub(crate) name: String,
     pub(crate) ph: String,
-    pub(crate) ts: u64,
+    pub(crate) ts: f64, // timestamp in microseconds
     pub(crate) pid: u32,
     pub(crate) tid: u32,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub(crate) args: HashMap<String, Value>,
-    pub(crate) dur: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) dur: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) s: Option<String>, // scope for instant events
 }
 
@@ -30,7 +33,7 @@ impl TracingEvent {
         Self {
             name: "thread_name".to_string(),
             ph: "M".to_string(),
-            ts: 0,
+            ts: 0.0,
             pid,
             tid,
             args,
@@ -43,10 +46,10 @@ impl TracingEvent {
         pid: u32,
         tid: u32,
         name: String,
-        ts: u64,
+        ts: f64,
         args: HashMap<String, Value>,
         begin: bool, // if dur is set, begin is ignored
-        dur: Option<u64>,
+        dur: Option<f64>,
     ) -> Self {
         Self {
             name,
@@ -72,7 +75,7 @@ impl TracingEvent {
         pid: u32,
         tid: u32,
         name: String,
-        ts: u64,
+        ts: f64,
         args: HashMap<String, Value>,
         scope: InstantEventScope,
     ) -> Self {
