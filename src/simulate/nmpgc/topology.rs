@@ -1,6 +1,7 @@
 use super::super::memory::RankID;
+use std::fmt::Debug;
 
-trait Topology {
+pub(super) trait Topology {
     fn get_latency(&self, from: u8, to: u8) -> usize;
 }
 
@@ -14,7 +15,8 @@ impl Topology for FullyConnectedUniformTopology {
     }
 }
 
-struct LineTopology {
+#[derive(Clone)]
+pub(super) struct LineTopology {
     /// Latency between DIMMs
     dimm_latency_matrix: [[usize; 4]; 4],
 }
@@ -24,7 +26,7 @@ impl LineTopology {
     // Or going from the on DIMM link controller to the rank
     const DIMM_TO_RANK_LATENCY: usize = 2;
 
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         // 0: channel 0, dimm 0,
         // 1: channel 1, dimm 0,
         // 2, channel 0, dimm 1,
@@ -36,6 +38,12 @@ impl LineTopology {
         LineTopology {
             dimm_latency_matrix,
         }
+    }
+}
+
+impl Debug for LineTopology {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LineTopology")
     }
 }
 

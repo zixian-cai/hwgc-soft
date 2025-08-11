@@ -1,5 +1,6 @@
 use super::SimulationArchitecture;
 use crate::simulate::memory::RankID;
+use crate::simulate::nmpgc::topology::Topology;
 use crate::util::ticks_to_us;
 use crate::{simulate::memory::AddressMapping, *};
 use std::collections::{HashMap, VecDeque};
@@ -139,6 +140,7 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     idle_ranges: Vec<(usize, usize)>,
     idle_start: Option<usize>,
     frequency_ghz: f64, // Only valid for DDR4-3200
+    topology: topology::LineTopology,
 }
 
 impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
@@ -159,6 +161,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             idle_start: None,
             frequency_ghz: 1.6,
             idle_readinbox_ticks: 0,
+            topology: topology::LineTopology::new(),
         }
     }
 
@@ -168,7 +171,9 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             NMPProcessorWork::Idle => 1,
             NMPProcessorWork::Load(e) => self.cache.read_latency(*e as u64),
             NMPProcessorWork::ReadInbox => 2,
-            NMPProcessorWork::SendMessage(_) => 10,
+            NMPProcessorWork::SendMessage(m) => {
+                self.topology.get_latency(self.id as u8, m.recipient as u8)
+            }
         }
     }
 
