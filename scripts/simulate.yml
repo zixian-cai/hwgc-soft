@@ -1,0 +1,14 @@
+includes:
+  - "./runbms-base.yml"
+
+overrides:
+  "invocations": 1
+
+configs:
+  - "native|run_simulation-hwgc_soft|om-OpenJDK|subcommand-simulate|a-NMPGC|p-8"
+
+plugins:
+  copy_trace:
+    type: CopyFile
+    patterns:
+      - "*.json.gz"

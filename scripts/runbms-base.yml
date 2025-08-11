@@ -66,6 +66,9 @@ modifiers:
   run_build:
     type: Wrapper
     val: "$PWD/scripts/runbms.py {0}"
+  run_simulation:
+    type: Wrapper
+    val: "$PWD/scripts/simulate.py {0}"
   subcommand:
     type: ProgramArg
     val: "{0}"
@@ -75,6 +78,12 @@ modifiers:
   tl:
     type: ProgramArg
     val: "-t {0}"
+  a:
+    type: ProgramArg
+    val: "-a {0}"
+  p:
+    type: ProgramArg
+    val: "-p {0}"
 
 runtimes:
   native:
