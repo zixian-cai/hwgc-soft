@@ -1,11 +1,12 @@
-use polars::time;
-
 use super::SimulationArchitecture;
 use crate::simulate::memory::RankID;
-use crate::simulate::tracing::InstantEventScope;
 use crate::util::ticks_to_us;
-use crate::{simulate::memory::AddressMapping, trace::trace_object, *};
+use crate::{simulate::memory::AddressMapping, *};
 use std::collections::{HashMap, VecDeque};
+
+mod topology;
+mod work;
+use work::{NMPMessage, NMPProcessorWork, NMPProcessorWorkType};
 
 use super::memory::{DataCache, SetAssociativeCache};
 use super::tracing::TracingEvent;
@@ -140,37 +141,6 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     frequency_ghz: f64, // Only valid for DDR4-3200
 }
 
-#[derive(Debug, Clone)]
-enum NMPProcessorWork {
-    Mark(u64),
-    Load(*mut u64),
-    Idle,
-    ReadInbox,
-    SendMessage(NMPMessage),
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, PartialEq, Hash, Eq)]
-enum NMPProcessorWorkType {
-    Mark = 0,
-    Load = 1,
-    Idle = 2,
-    ReadInbox = 3,
-    SendMessage = 4,
-}
-
-impl NMPProcessorWork {
-    fn get_type(&self) -> NMPProcessorWorkType {
-        match self {
-            NMPProcessorWork::Mark(_) => NMPProcessorWorkType::Mark,
-            NMPProcessorWork::Load(_) => NMPProcessorWorkType::Load,
-            NMPProcessorWork::Idle => NMPProcessorWorkType::Idle,
-            NMPProcessorWork::ReadInbox => NMPProcessorWorkType::ReadInbox,
-            NMPProcessorWork::SendMessage(_) => NMPProcessorWorkType::SendMessage,
-        }
-    }
-}
-
 impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
     fn new(id: usize) -> Self {
         NMPProcessor {
@@ -190,147 +160,6 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             frequency_ghz: 1.6,
             idle_readinbox_ticks: 0,
         }
-    }
-    fn tick<O: ObjectModel>(&mut self) -> Option<NMPMessage> {
-        self.ticks += 1;
-
-        // This is to deal with the latencies of actions that take more than one tick
-        if self.stall_ticks > 0 {
-            self.stall_ticks -= 1;
-            self.busy_ticks += 1;
-            trace!(
-                "[P{}] stalled for {:?}, {} ticks left",
-                self.id,
-                self.stalled_work,
-                self.stall_ticks
-            );
-            return None;
-        }
-
-        let work = if let Some(w) = self.stalled_work.take() {
-            trace!("[P{}] executing previously stalled work: {:?}", self.id, w);
-            // Act on the stalled work
-            w
-        } else {
-            if let Some(w) = self.works.pop_front() {
-                if self.get_latency(&w) > 1 {
-                    // If the work takes more than one tick, stall it
-                    self.stall_ticks = self.get_latency(&w) - 1; // -1 because we are already in this tick
-                    self.stalled_work = Some(w);
-                    trace!(
-                        "[P{}] stalling work: {:?}, {} ticks left",
-                        self.id,
-                        self.stalled_work,
-                        self.stall_ticks
-                    );
-                    return None;
-                } else {
-                    w
-                }
-            } else {
-                NMPProcessorWork::Idle
-            }
-        };
-
-        if !matches!(work, NMPProcessorWork::Idle) {
-            self.busy_ticks += 1;
-        }
-
-        if !(matches!(work, NMPProcessorWork::Idle) || matches!(work, NMPProcessorWork::ReadInbox))
-        {
-            // This processor is doing productive work now
-            if let Some(start) = self.idle_start.take() {
-                self.idle_ranges.push((start, self.ticks - 1));
-            }
-        }
-
-        let mut ret = None;
-        self.work_count
-            .entry(work.get_type())
-            .and_modify(|e| *e += 1)
-            .or_insert(1);
-        match work {
-            NMPProcessorWork::Mark(o) => {
-                trace!("[P{}] marking object {}", self.id, o);
-                if unsafe { trace_object(o, 1) } {
-                    self.cache.write(o);
-                    self.marked_objects += 1;
-                    O::scan_object(o, |edge, repeat| {
-                        for i in 0..repeat {
-                            let e = edge.wrapping_add(i as usize);
-                            let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(e as u64);
-                            if owner == self.id {
-                                self.works.push_back(NMPProcessorWork::Load(e));
-                            } else {
-                                self.works
-                                    .push_back(NMPProcessorWork::SendMessage(NMPMessage {
-                                        recipient: owner,
-                                        work: NMPMessageWork::Load(e),
-                                    }));
-                            }
-                        }
-                    });
-                }
-            }
-            NMPProcessorWork::Load(e) => {
-                let child = unsafe { *e };
-                self.cache.read(e as u64);
-                if child != 0 {
-                    let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(child);
-                    if owner == self.id {
-                        self.works.push_back(NMPProcessorWork::Mark(child));
-                    } else {
-                        let msg = NMPMessage {
-                            recipient: owner,
-                            work: NMPMessageWork::Mark(child),
-                        };
-                        self.works.push_back(NMPProcessorWork::SendMessage(msg));
-                    }
-                }
-            }
-            NMPProcessorWork::Idle => {
-                if !self.inbox.is_empty() {
-                    self.idle_readinbox_ticks += 1;
-                    self.works.push_back(NMPProcessorWork::ReadInbox);
-                } else {
-                    // This process is truly idle
-                    if self.idle_start.is_none() {
-                        self.idle_start = Some(self.ticks);
-                    }
-                }
-            }
-            NMPProcessorWork::SendMessage(msg) => {
-                trace!(
-                    "[P{}] sending message to P{}: {:?}",
-                    self.id,
-                    msg.recipient,
-                    msg.work
-                );
-                ret = Some(msg);
-            }
-            NMPProcessorWork::ReadInbox => {
-                if let Some(msg) = self.inbox.pop() {
-                    trace!("[P{}] reading inbox message: {:?}", self.id, msg);
-                    match msg.work {
-                        NMPMessageWork::Load(e) => {
-                            self.works.push_back(NMPProcessorWork::Load(e));
-                        }
-                        NMPMessageWork::Mark(o) => {
-                            self.works.push_back(NMPProcessorWork::Mark(o));
-                        }
-                    }
-                }
-            }
-        }
-        trace!(
-            "[P{}] work count: {:?}, inbox count: {:?}, stalled_work: {:?}, marked_objects: {:?}",
-            self.id,
-            self.works.len(),
-            self.inbox.len(),
-            self.stalled_work,
-            self.marked_objects
-        );
-        ret
     }
 
     fn get_latency(&self, work: &NMPProcessorWork) -> usize {
@@ -442,17 +271,4 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         // ));
         events
     }
-}
-
-#[derive(Debug, Clone)]
-/// Each processor generates at most one message per tick
-struct NMPMessage {
-    recipient: usize,
-    work: NMPMessageWork,
-}
-
-#[derive(Debug, Clone)]
-enum NMPMessageWork {
-    Mark(u64),
-    Load(*mut u64),
 }

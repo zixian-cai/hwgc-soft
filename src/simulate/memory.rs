@@ -234,6 +234,12 @@ impl Display for RankID {
     }
 }
 
+impl PartialEq for RankID {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
 impl RankID {
     pub(crate) fn to_dict(&self) -> HashMap<String, Value> {
         let mut dict = HashMap::new();
