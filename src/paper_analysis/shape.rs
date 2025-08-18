@@ -48,7 +48,7 @@ fn merge_counts(count_a: &mut CountMap, count_b: &CountMap) {
 }
 
 fn analyze_one_file(path: &Path) -> Result<CountMap> {
-    let heapdump = HeapDump::from_binpb_zst(path)?;
+    let heapdump = HeapDump::from_path(path.to_str().expect("File path should be valid UTF-8"))?;
     let shape_count = heapdump
         .objects
         .par_iter()

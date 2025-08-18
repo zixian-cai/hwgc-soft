@@ -167,7 +167,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
     for path in &args.paths {
         // reset object model internal states
         object_model.reset();
-        let heapdump = HeapDump::from_binpb_zst(path)?;
+        let heapdump = HeapDump::from_path(path)?;
         // mmap
         heapdump.map_spaces()?;
         // write objects to the heap

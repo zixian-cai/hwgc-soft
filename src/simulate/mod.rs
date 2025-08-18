@@ -63,7 +63,7 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
         let start = std::time::Instant::now();
         // reset object model internal states
         object_model.reset();
-        let heapdump = HeapDump::from_binpb_zst(path)?;
+        let heapdump = HeapDump::from_path(path)?;
         // mmap
         heapdump.map_spaces()?;
         // write objects to the heap

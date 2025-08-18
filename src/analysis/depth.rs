@@ -19,7 +19,7 @@ pub fn object_depth<O: ObjectModel>(mut object_model: O, args: Args) -> Result<(
     };
     let mut dfs = vec![];
     for (i, path) in args.paths.iter().enumerate() {
-        let heapdump = HeapDump::from_binpb_zst(path)?;
+        let heapdump = HeapDump::from_path(path)?;
         object_model.reset();
         heapdump.map_spaces()?;
         object_model.restore_objects(&heapdump);

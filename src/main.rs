@@ -13,7 +13,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
 
     for path in &args.paths {
         let start = Instant::now();
-        let heapdump = HeapDump::from_binpb_zst(path)?;
+        let heapdump = HeapDump::from_path(path)?;
         let tibs_cached = object_model.restore_tibs(&heapdump);
         let elapsed = start.elapsed();
         info!(
