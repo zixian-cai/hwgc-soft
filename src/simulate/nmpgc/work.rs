@@ -115,6 +115,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     self.cache.write(o);
                     self.marked_objects += 1;
                     O::scan_object(o, |edge, repeat| {
+                        // FIXME: This is wrong, at most one push_back per tick
                         for i in 0..repeat {
                             let e = edge.wrapping_add(i as usize);
                             let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(e as u64);

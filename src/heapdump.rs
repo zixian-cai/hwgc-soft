@@ -33,6 +33,8 @@ impl HeapDump {
                 Some(name) => {
                     if name.starts_with("linked_list") {
                         LinkedListHeapDump::new(name).to_heapdump()
+                    } else if name.starts_with("objarray") {
+                        LeafObjectArrayHeapDump::new(name).to_heapdump()
                     } else {
                         return Err(anyhow::anyhow!("Invalid synthetic heapdump name: {}", path));
                     }
@@ -77,6 +79,7 @@ impl HeapDump {
 
 // To test
 // RUST_BACKTRACE=1 RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run --release -- [synthetic]linked_list_16777216 -o OpenJDK trace -t EdgeSlot
+// RUST_BACKTRACE=1 RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run --release -- [synthetic]linked_list_2097152  -o OpenJDK simulate -a NMPGC -p 8
 pub struct LinkedListHeapDump {
     num_nodes: usize,
 }
@@ -127,6 +130,74 @@ impl LinkedListHeapDump {
             })
             .collect();
         let roots = vec![root_edge];
+        HeapDump {
+            objects,
+            roots,
+            spaces,
+        }
+    }
+}
+
+// RUST_BACKTRACE=1 RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run --release -- [synthetic]objarray_33554432 -o OpenJDK simulate -a NMPGC -p 8
+// The utlization is actually quite bad, why?
+pub struct LeafObjectArrayHeapDump {
+    num_objs: usize,
+}
+
+impl LeafObjectArrayHeapDump {
+    pub fn new(path: &str) -> Self {
+        let num_objs = path
+            .strip_prefix("objarray_")
+            .expect("Specify the number of nodes after \"[synthetic]objarray_\"")
+            .parse::<usize>()
+            .expect("Invalid number for the number of objects in the leaf object array");
+        LeafObjectArrayHeapDump { num_objs }
+    }
+
+    pub fn to_heapdump(&self) -> HeapDump {
+        let object_size = 2 * 8; // two words, header, klass
+        let array_size = 3 * 8 + self.num_objs * 8; // header, Klass, array length, and the references
+        let objects_start = (0x20000000000 + array_size as u64).next_multiple_of(16); // Alignment
+        let immix_space = generated_src::Space {
+            name: "immix".to_string(),
+            start: 0x20000000000,
+            end: 0x20000000000 + (self.num_objs * object_size + array_size) as u64,
+        };
+        let spaces = vec![immix_space];
+        let root_edge = generated_src::RootEdge {
+            objref: 0x20000000000,
+        };
+
+        let roots = vec![root_edge];
+        let arary_content: Vec<NormalEdge> = (0..self.num_objs)
+            .map(|i| generated_src::NormalEdge {
+                slot: (0x20000000000 + 3 * 8 + i * 8) as u64,
+                objref: objects_start + (i * object_size) as u64,
+            })
+            .collect();
+        let mut objects: Vec<HeapObject> = vec![generated_src::HeapObject {
+            start: 0x20000000000,
+            klass: 42, // Klass for the java.lang.Object[
+            size: array_size as u64,
+            objarray_length: Some(self.num_objs as u64),
+            instance_mirror_start: None,
+            instance_mirror_count: None,
+            edges: arary_content,
+        }];
+
+        (0..self.num_objs).for_each(|i| {
+            let start = objects_start + (i * object_size) as u64;
+            objects.push(generated_src::HeapObject {
+                start,
+                klass: 43,
+                size: object_size as u64,
+                objarray_length: None,
+                instance_mirror_start: None,
+                instance_mirror_count: None,
+                edges: vec![], // Leaf object with no outgoing pointers
+            });
+        });
+
         HeapDump {
             objects,
             roots,
