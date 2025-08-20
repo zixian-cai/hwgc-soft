@@ -79,8 +79,12 @@ pub struct SimulationArgs {
     pub(crate) processors: usize,
     #[arg(short, long, value_enum)]
     pub(crate) architecture: SimulationArchitectureChoice,
-    #[arg(short, long)]
+    #[arg(long)]
     pub(crate) trace_path: Option<String>,
+    #[arg(short, long)]
+    pub(crate) topology: SimulationMemoryLinkTopology,
+    #[arg(short, long)]
+    pub(crate) mem_config: SimulationMemoryConfiguration,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
@@ -88,6 +92,47 @@ pub struct SimulationArgs {
 pub enum SimulationArchitectureChoice {
     IdealTraceUtilization,
     NMPGC,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ValueEnum)]
+#[clap(rename_all = "verbatim")]
+pub enum SimulationMemoryConfiguration {
+    C1D1R1 = 0, // 1 channel, 1 DIMM, 1 rank
+    C2D1R1 = 1, // 2 channels, 1 DIMM, 1 rank,
+    C1D2R1 = 2, // 1 channel, 2 DIMMs, 1 rank
+    C1D1R2 = 3, // 1 channel, 1 DIMM, 2 ranks
+    C1D2R2 = 4, // 1 channel, 2 DIMMs, 2 ranks
+    C2D1R2 = 5, // 2 channels, 1 DIMM, 2 ranks
+    C2D2R1 = 6, // 2 channels, 2 DIMMs, 1 rank
+    C2D2R2 = 7, // 2 channels, 2 DIMMs, 2 ranks
+}
+
+impl SimulationMemoryConfiguration {
+    pub fn get_total_ranks(&self) -> u8 {
+        match self {
+            SimulationMemoryConfiguration::C1D1R1 => 1,
+            SimulationMemoryConfiguration::C2D1R1 => 2,
+            SimulationMemoryConfiguration::C1D2R1 => 2,
+            SimulationMemoryConfiguration::C1D1R2 => 2,
+            SimulationMemoryConfiguration::C1D2R2 => 4,
+            SimulationMemoryConfiguration::C2D1R2 => 4,
+            SimulationMemoryConfiguration::C2D2R1 => 4,
+            SimulationMemoryConfiguration::C2D2R2 => 8,
+        }
+    }
+
+    pub fn get_owner_processor(&self, addr: u64) -> u8 {
+        self.get_global_rank_id(addr)
+    }
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, ValueEnum)]
+#[clap(rename_all = "verbatim")]
+pub enum SimulationMemoryLinkTopology {
+    FullyConnected,
+    Line,
 }
 
 #[derive(Subcommand, Debug)]

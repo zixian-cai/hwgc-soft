@@ -75,20 +75,12 @@ pub fn reified_simulation<O: ObjectModel>(mut object_model: O, args: Args) -> Re
                 simuation.run::<O>();
                 (simuation.stats(), simuation.events())
             }
-            SimulationArchitectureChoice::NMPGC => match simulation_args.processors {
-                8 => {
-                    let mut simulation: Simulation<NMPGC<3>> =
-                        Simulation::new(&simulation_args, &object_model);
-                    simulation.run::<O>();
-                    (simulation.stats(), simulation.events())
-                }
-                _ => {
-                    panic!(
-                        "Unsupported number of processors for NMPGC: {}",
-                        simulation_args.processors
-                    );
-                }
-            },
+            SimulationArchitectureChoice::NMPGC => {
+                let mut simulation: Simulation<NMPGC> =
+                    Simulation::new(&simulation_args, &object_model);
+                simulation.run::<O>();
+                (simulation.stats(), simulation.events())
+            }
         };
         let duration = start.elapsed();
         println!(

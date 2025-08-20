@@ -52,7 +52,7 @@ impl NMPProcessorWork {
     }
 }
 
-impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
+impl NMPProcessor {
     pub(super) fn tick<O: ObjectModel>(&mut self) -> Option<NMPMessage> {
         self.ticks += 1;
 
@@ -115,7 +115,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             NMPProcessorWork::Mark(o) => {
                 trace!("[P{}] marking object {}", self.id, o);
                 if unsafe { trace_object(o, 1) } {
-                    self.cache.write(o);
+                    self.cache.write(self.mem_config, o);
                     self.marked_objects += 1;
                     O::scan_object(o, |edge, repeat| {
                         // To avoid edges getting dereferenced when there's no edge
@@ -134,14 +134,14 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             }
             NMPProcessorWork::Load(e) => {
                 let child = unsafe { *e };
-                self.cache.read(e as u64);
+                self.cache.read(self.mem_config, e as u64);
                 if child != 0 {
-                    let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(child);
-                    if owner == self.id {
+                    let owner = self.mem_config.get_owner_processor(child);
+                    if owner as usize == self.id {
                         self.works.push_back(NMPProcessorWork::Mark(child));
                     } else {
                         let msg = NMPMessage {
-                            recipient: owner,
+                            recipient: owner as usize,
                             work: NMPMessageWork::Mark(child),
                         };
                         self.works.push_back(NMPProcessorWork::SendMessage(msg));
@@ -186,14 +186,14 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 let (first_edge_in_chunk, edges_in_chunk) =
                     *self.edge_chunks.get(chunk_idx).unwrap();
                 let e = (first_edge_in_chunk as *mut u64).wrapping_add(edge_idx as usize);
-                let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(e as u64);
-                if owner == self.id {
+                let owner = self.mem_config.get_owner_processor(e as u64);
+                if owner as usize == self.id {
                     self.works.push_back(NMPProcessorWork::Load(e));
                 } else {
                     // Eagerly publish work so others have work to do
                     self.works
                         .push_front(NMPProcessorWork::SendMessage(NMPMessage {
-                            recipient: owner,
+                            recipient: owner as usize,
                             work: NMPMessageWork::Load(e),
                         }));
                 }

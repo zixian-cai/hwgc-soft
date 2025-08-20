@@ -1,8 +1,7 @@
 use super::SimulationArchitecture;
-use crate::simulate::memory::RankID;
 use crate::simulate::nmpgc::topology::Topology;
 use crate::util::ticks_to_us;
-use crate::{simulate::memory::AddressMapping, *};
+use crate::*;
 use std::collections::{HashMap, VecDeque};
 use std::process;
 
@@ -13,37 +12,33 @@ use work::{NMPMessage, NMPProcessorWork, NMPProcessorWorkType};
 use super::memory::{DataCache, SetAssociativeCache};
 use super::tracing::TracingEvent;
 
-pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
-    processors: Vec<NMPProcessor<LOG_NUM_THREADS>>,
+pub(crate) struct NMPGC {
+    processors: Vec<NMPProcessor>,
     ticks: usize,
     frequency_ghz: f64,
+    mem_config: SimulationMemoryConfiguration,
 }
 
-impl<const LOG_NUM_THREADS: u8> NMPGC<LOG_NUM_THREADS> {
-    const NUM_THREADS: u64 = 1u64 << LOG_NUM_THREADS;
-    fn get_owner_processor(o: u64) -> usize {
-        let mapping = AddressMapping(o);
-        mapping.get_owner_id()
-    }
-}
-
-impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS> {
-    fn new<O: ObjectModel>(_args: &SimulationArgs, object_model: &O) -> Self {
-        // Convert &[u64] into Vec<u64>
-        let mut processors: Vec<NMPProcessor<LOG_NUM_THREADS>> = (0..Self::NUM_THREADS)
-            .map(|id| NMPProcessor::new(id as usize))
+impl SimulationArchitecture for NMPGC {
+    fn new<O: ObjectModel>(args: &SimulationArgs, object_model: &O) -> Self {
+        let num_processors = args.mem_config.get_total_ranks() as usize;
+        let mut processors: Vec<NMPProcessor> = (0..num_processors)
+            .map(|id| NMPProcessor::new(id as usize, args.mem_config, args.topology))
             .collect();
         for root in object_model.roots() {
             let o = *root;
             debug_assert_ne!(o, 0);
-            let owner = Self::get_owner_processor(o);
-            processors[owner].works.push_back(NMPProcessorWork::Mark(o));
+            let owner = args.mem_config.get_owner_processor(o);
+            processors[owner as usize]
+                .works
+                .push_back(NMPProcessorWork::Mark(o));
         }
         NMPGC {
             processors,
             ticks: 0,
             // Only valid for DDR4-3200
             frequency_ghz: 1.6,
+            mem_config: args.mem_config,
         }
     }
 
@@ -138,7 +133,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
 }
 
 #[derive(Debug, Clone)]
-struct NMPProcessor<const LOG_NUM_THREADS: u8> {
+struct NMPProcessor {
     id: usize,
     ticks: usize, // This is synchronized with the global ticks
     busy_ticks: usize,
@@ -156,10 +151,15 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     topology: topology::LineTopology,
     edge_chunks: Vec<(u64, u64)>,
     edge_chunk_cursor: (usize, u64),
+    pub(crate) mem_config: SimulationMemoryConfiguration,
 }
 
-impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
-    fn new(id: usize) -> Self {
+impl NMPProcessor {
+    fn new(
+        id: usize,
+        mem_config: SimulationMemoryConfiguration,
+        _topology: SimulationMemoryLinkTopology,
+    ) -> Self {
         NMPProcessor {
             id,
             busy_ticks: 0,
@@ -179,14 +179,15 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             topology: topology::LineTopology::new(),
             edge_chunks: vec![],
             edge_chunk_cursor: (0, 0),
+            mem_config,
         }
     }
 
     fn get_latency(&self, work: &NMPProcessorWork) -> usize {
         match work {
-            NMPProcessorWork::Mark(o) => self.cache.write_latency(*o),
+            NMPProcessorWork::Mark(o) => self.cache.write_latency(self.mem_config, *o),
             NMPProcessorWork::Idle => 1,
-            NMPProcessorWork::Load(e) => self.cache.read_latency(*e as u64),
+            NMPProcessorWork::Load(e) => self.cache.read_latency(self.mem_config, *e as u64),
             NMPProcessorWork::ReadInbox => 2,
             NMPProcessorWork::SendMessage(m) => {
                 self.topology.get_latency(self.id as u8, m.recipient as u8)
@@ -200,7 +201,11 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
     }
 
     fn to_thread_name_event(&self) -> TracingEvent {
-        TracingEvent::new_threadname_event(0, self.id as u32, RankID(self.id as u8).to_string())
+        TracingEvent::new_threadname_event(
+            0,
+            self.id as u32,
+            self.mem_config.global_rank_id_to_name(self.id as u8),
+        )
     }
 
     fn events(&self) -> Vec<TracingEvent> {
