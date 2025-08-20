@@ -25,6 +25,7 @@ pub(super) enum NMPProcessorWork {
     Idle,
     ReadInbox,
     SendMessage(NMPMessage),
+    ContinueScan,
 }
 
 #[repr(u8)]
@@ -35,6 +36,7 @@ pub(super) enum NMPProcessorWorkType {
     Idle = 2,
     ReadInbox = 3,
     SendMessage = 4,
+    ContinueScan = 5,
 }
 
 impl NMPProcessorWork {
@@ -45,6 +47,7 @@ impl NMPProcessorWork {
             NMPProcessorWork::Idle => NMPProcessorWorkType::Idle,
             NMPProcessorWork::ReadInbox => NMPProcessorWorkType::ReadInbox,
             NMPProcessorWork::SendMessage(_) => NMPProcessorWorkType::SendMessage,
+            NMPProcessorWork::ContinueScan => NMPProcessorWorkType::ContinueScan,
         }
     }
 }
@@ -115,21 +118,18 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     self.cache.write(o);
                     self.marked_objects += 1;
                     O::scan_object(o, |edge, repeat| {
-                        // FIXME: This is wrong, at most one push_back per tick
-                        for i in 0..repeat {
-                            let e = edge.wrapping_add(i as usize);
-                            let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(e as u64);
-                            if owner == self.id {
-                                self.works.push_back(NMPProcessorWork::Load(e));
-                            } else {
-                                self.works
-                                    .push_back(NMPProcessorWork::SendMessage(NMPMessage {
-                                        recipient: owner,
-                                        work: NMPMessageWork::Load(e),
-                                    }));
-                            }
+                        // To avoid edges getting dereferenced when there's no edge
+                        if repeat > 0 {
+                            self.edge_chunks.push((edge as u64, repeat));
                         }
                     });
+                    self.edge_chunk_cursor = (0, 0);
+                    if !self.edge_chunks.is_empty() {
+                        // To make sure we finish scanning the current object first
+                        // Otherwise, we might end up doing other work, such as loading edges and marking objects
+                        // and disrupts the current scanning process
+                        self.works.push_front(NMPProcessorWork::ContinueScan);
+                    }
                 }
             }
             NMPProcessorWork::Load(e) => {
@@ -179,6 +179,36 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                             self.works.push_back(NMPProcessorWork::Mark(o));
                         }
                     }
+                }
+            }
+            NMPProcessorWork::ContinueScan => {
+                let (chunk_idx, edge_idx) = self.edge_chunk_cursor;
+                let (first_edge_in_chunk, edges_in_chunk) =
+                    *self.edge_chunks.get(chunk_idx).unwrap();
+                let e = (first_edge_in_chunk as *mut u64).wrapping_add(edge_idx as usize);
+                let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(e as u64);
+                if owner == self.id {
+                    self.works.push_back(NMPProcessorWork::Load(e));
+                } else {
+                    // Eagerly publish work so others have work to do
+                    self.works
+                        .push_front(NMPProcessorWork::SendMessage(NMPMessage {
+                            recipient: owner,
+                            work: NMPMessageWork::Load(e),
+                        }));
+                }
+                if edge_idx + 1 < edges_in_chunk {
+                    // Move to the next edge in the current chunk
+                    self.edge_chunk_cursor = (chunk_idx, edge_idx + 1);
+                    self.works.push_front(NMPProcessorWork::ContinueScan);
+                } else if chunk_idx + 1 < self.edge_chunks.len() {
+                    // Move to the next chunk
+                    self.edge_chunk_cursor = (chunk_idx + 1, 0);
+                    self.works.push_front(NMPProcessorWork::ContinueScan);
+                } else {
+                    // No more edges to process
+                    self.edge_chunks.clear();
+                    self.edge_chunk_cursor = (0, 0);
                 }
             }
         }

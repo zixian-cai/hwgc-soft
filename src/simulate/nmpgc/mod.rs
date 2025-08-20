@@ -141,6 +141,8 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     idle_start: Option<usize>,
     frequency_ghz: f64, // Only valid for DDR4-3200
     topology: topology::LineTopology,
+    edge_chunks: Vec<(u64, u64)>,
+    edge_chunk_cursor: (usize, u64),
 }
 
 impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
@@ -162,6 +164,8 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             frequency_ghz: 1.6,
             idle_readinbox_ticks: 0,
             topology: topology::LineTopology::new(),
+            edge_chunks: vec![],
+            edge_chunk_cursor: (0, 0),
         }
     }
 
@@ -174,6 +178,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             NMPProcessorWork::SendMessage(m) => {
                 self.topology.get_latency(self.id as u8, m.recipient as u8)
             }
+            NMPProcessorWork::ContinueScan => 1,
         }
     }
 
