@@ -3,6 +3,8 @@ mod generated_src {
 }
 use anyhow::Result;
 use prost::Message;
+use rand::seq::SliceRandom;
+use rand::{rngs::SmallRng, SeedableRng};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -82,30 +84,34 @@ impl HeapDump {
 // RUST_BACKTRACE=1 RUST_LOG=info PATH=$HOME/protoc/bin:$PATH cargo run --release -- [synthetic]linked_list_2097152  -o OpenJDK simulate -a NMPGC -p 8
 pub struct LinkedListHeapDump {
     num_nodes: usize,
+    sequential: bool,
 }
 
 impl LinkedListHeapDump {
     pub fn new(path: &str) -> Self {
-        let num_nodes = path
+        let arguments = path
             .strip_prefix("linked_list_")
-            .expect("Specify the number of nodes after \"[synthetic]linked_list_\"")
+            .expect("The argument format is \"[synthetic]linked_list_<num nodes>_<sequential: true or false, default true>\"");
+        let parts: Vec<&str> = arguments.split('_').collect();
+        let num_nodes = parts[0]
             .parse::<usize>()
             .expect("Invalid number for the number of nodes in the linked list");
-        LinkedListHeapDump { num_nodes }
+        let sequential = if parts.len() > 1 {
+            parts[1]
+                .parse::<bool>()
+                .expect("Invalid value for sequential, must be true or false")
+        } else {
+            true
+        };
+        LinkedListHeapDump {
+            num_nodes,
+            sequential,
+        }
     }
 
-    pub fn to_heapdump(&self) -> HeapDump {
+    fn sequential_objects(&self) -> Vec<HeapObject> {
         let object_size = 4 * 8; // four words, header, klass, val, next
-        let immix_space = generated_src::Space {
-            name: "immix".to_string(),
-            start: 0x20000000000,
-            end: 0x20000000000 + (self.num_nodes * object_size) as u64,
-        };
-        let spaces = vec![immix_space];
-        let root_edge = generated_src::RootEdge {
-            objref: 0x20000000000,
-        };
-        let objects: Vec<HeapObject> = (0..self.num_nodes)
+        (0..self.num_nodes)
             .map(|i| {
                 let start = 0x20000000000 + (i * object_size) as u64;
                 let would_be_next_node = 0x20000000000 + ((i + 1) * object_size) as u64;
@@ -128,7 +134,56 @@ impl LinkedListHeapDump {
                     edges,
                 }
             })
+            .collect()
+    }
+
+    fn random_objects(&self) -> Vec<HeapObject> {
+        let object_size = 4 * 8; // four words, header, klass, val, next
+        let mut objects: Vec<HeapObject> = (0..self.num_nodes)
+            .map(|i| {
+                let start = 0x20000000000 + (i * object_size) as u64;
+                generated_src::HeapObject {
+                    start,
+                    // Doesn't need to be a valid pointer, since the Klass
+                    // objects are inferred and constructed when the heapdump is mapped
+                    klass: 42,
+                    size: object_size as u64,
+                    objarray_length: None,
+                    instance_mirror_start: None,
+                    instance_mirror_count: None,
+                    edges: vec![],
+                }
+            })
             .collect();
+        let mut rng = SmallRng::seed_from_u64(42); // Fixed seed for reproducibility
+        objects.shuffle(&mut rng);
+        for i in 0..self.num_nodes - 1 {
+            let next_node = objects[i + 1].start;
+            let first_slot = objects[i].start + 16;
+            objects[i].edges.push(generated_src::NormalEdge {
+                slot: first_slot,
+                objref: next_node,
+            });
+        }
+        objects
+    }
+
+    pub fn to_heapdump(&self) -> HeapDump {
+        let object_size = 4 * 8; // four words, header, klass, val, next
+        let immix_space = generated_src::Space {
+            name: "immix".to_string(),
+            start: 0x20000000000,
+            end: 0x20000000000 + (self.num_nodes * object_size) as u64,
+        };
+        let spaces = vec![immix_space];
+        let objects = if self.sequential {
+            self.sequential_objects()
+        } else {
+            self.random_objects()
+        };
+        let root_edge = generated_src::RootEdge {
+            objref: objects[0].start,
+        };
         let roots = vec![root_edge];
         HeapDump {
             objects,
