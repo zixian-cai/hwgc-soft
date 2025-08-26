@@ -197,16 +197,29 @@ impl LinkedListHeapDump {
 // The utlization is actually quite bad, why?
 pub struct LeafObjectArrayHeapDump {
     num_objs: usize,
+    sequential: bool,
 }
 
 impl LeafObjectArrayHeapDump {
     pub fn new(path: &str) -> Self {
-        let num_objs = path
+        let arguments = path
             .strip_prefix("objarray_")
-            .expect("Specify the number of nodes after \"[synthetic]objarray_\"")
+            .expect("The argument format is \"[synthetic]objarray_<num objects>_<sequential: true or false, default true>");
+        let parts: Vec<&str> = arguments.split('_').collect();
+        let num_objs = parts[0]
             .parse::<usize>()
-            .expect("Invalid number for the number of objects in the leaf object array");
-        LeafObjectArrayHeapDump { num_objs }
+            .expect("Invalid number for the number of objects in the object array");
+        let sequential = if parts.len() > 1 {
+            parts[1]
+                .parse::<bool>()
+                .expect("Invalid value for sequential, must be true or false")
+        } else {
+            true
+        };
+        LeafObjectArrayHeapDump {
+            num_objs,
+            sequential,
+        }
     }
 
     pub fn to_heapdump(&self) -> HeapDump {
@@ -224,12 +237,16 @@ impl LeafObjectArrayHeapDump {
         };
 
         let roots = vec![root_edge];
-        let arary_content: Vec<NormalEdge> = (0..self.num_objs)
+        let mut array_content: Vec<NormalEdge> = (0..self.num_objs)
             .map(|i| generated_src::NormalEdge {
                 slot: (0x20000000000 + 3 * 8 + i * 8) as u64,
                 objref: objects_start + (i * object_size) as u64,
             })
             .collect();
+        if !self.sequential {
+            let mut rng = SmallRng::seed_from_u64(42); // Fixed seed
+            array_content.shuffle(&mut rng);
+        }
         let mut objects: Vec<HeapObject> = vec![generated_src::HeapObject {
             start: 0x20000000000,
             klass: 42, // Klass for the java.lang.Object[
@@ -237,7 +254,7 @@ impl LeafObjectArrayHeapDump {
             objarray_length: Some(self.num_objs as u64),
             instance_mirror_start: None,
             instance_mirror_count: None,
-            edges: arary_content,
+            edges: array_content,
         }];
 
         (0..self.num_objs).for_each(|i| {
