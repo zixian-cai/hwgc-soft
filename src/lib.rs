@@ -13,6 +13,7 @@ mod heapdump;
 pub mod m5;
 mod object_model;
 mod paper_analysis;
+mod probes;
 mod simulate;
 mod trace;
 mod util;

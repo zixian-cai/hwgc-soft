@@ -5,6 +5,7 @@ use crate::trace::shape_cache::ShapeLruCache;
 
 use std::time::{Duration, Instant};
 
+use crate::probes::*;
 use crate::*;
 use anyhow::Result;
 #[cfg(feature = "zsim")]
@@ -168,6 +169,8 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         // reset object model internal states
         object_model.reset();
         let heapdump = HeapDump::from_path(path)?;
+        let path_cstr = std::ffi::CString::new(path.as_str()).unwrap();
+        trace_heapdump_begin(path_cstr.as_ptr());
         // mmap
         heapdump.map_spaces()?;
         // write objects to the heap
@@ -207,6 +210,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         }
         for i in 0..iterations {
             mark_sense = (i % 2 == 0) as u8;
+            trace_iteration_begin(i);
             let timed_stats = transitive_closure(
                 trace_args,
                 mark_sense,
@@ -214,6 +218,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
                 &mut shape_cache,
                 tracer.as_deref(),
             );
+            trace_iteration_end(i);
             let millis = timed_stats.time.as_micros() as f64 / 1000f64;
             let stats = timed_stats.stats;
             info!(
@@ -258,6 +263,7 @@ pub fn reified_trace<O: ObjectModel>(mut object_model: O, args: Args) -> Result<
         if let Some(tracer) = tracer.as_ref() {
             tracer.teardown();
         }
+        trace_heapdump_end();
     }
 
     println!("============================ Tabulate Statistics ============================");
