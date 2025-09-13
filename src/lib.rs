@@ -17,6 +17,7 @@ mod probes;
 mod simulate;
 mod trace;
 mod util;
+mod export;
 
 pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
@@ -31,3 +32,4 @@ pub use crate::paper_analysis::reified_paper_analysis;
 pub use crate::simulate::reified_simulation;
 pub use crate::trace::reified_trace;
 pub use crate::trace::TracingLoopChoice;
+pub use crate::export::export;

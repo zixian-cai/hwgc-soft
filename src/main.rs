@@ -30,6 +30,7 @@ fn reified_main<O: ObjectModel>(mut object_model: O, args: Args) -> Result<()> {
             Commands::Analyze(_) => reified_analysis(object_model, args),
             Commands::Depth(_) => object_depth(object_model, args),
             Commands::Simulate(_) => reified_simulation(object_model, args),
+            Commands::Export(_) => export(object_model, args),
             _ => unreachable!(),
         }
     } else {

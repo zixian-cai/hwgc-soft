@@ -94,4 +94,20 @@ pub enum Commands {
     Depth(DepthArgs),
     PaperAnalyze(PaperAnalysisArgs),
     Simulate(SimulationArgs),
+    Export(ExportArgs)
 }
+
+#[derive(Parser, Debug, Clone)]
+pub struct ExportArgs {
+    #[arg(short, long)]
+    pub(crate) output_path: String,
+    #[arg(short, long)]
+    pub(crate) format: ExportFormatChoice,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all = "verbatim")]
+pub enum ExportFormatChoice {
+    CosmographCsv,
+}
+
