@@ -1,5 +1,6 @@
 use crate::*;
 use anyhow::Result;
+use std::alloc;
 use std::collections::VecDeque;
 use std::path::Path;
 
@@ -15,12 +16,13 @@ struct Analysis {
     num_threads: usize,
     work_queue: VecDeque<TaggedWork>,
     stats: AnalysisStats,
-    group_slots: bool,
+    rle: bool,
     log_pointer_size: usize,
     #[allow(dead_code)]
     stride_length: usize,
     /// How far to go to get to the next stride of the same thread
     next_stride_delta: usize,
+    eager_load: bool,
 }
 
 impl Analysis {
@@ -30,11 +32,12 @@ impl Analysis {
             log_num_threads: args.log_num_threads,
             num_threads: 1 << args.log_num_threads,
             work_queue: VecDeque::new(),
-            stats: Default::default(),
-            group_slots: args.group_slots,
+            stats: AnalysisStats::new(1 << args.log_num_threads),
+            rle: args.rle,
             log_pointer_size: 3,
             stride_length: 1 << args.owner_shift,
             next_stride_delta: 1 << (args.owner_shift + args.log_num_threads),
+            eager_load: args.eager_load,
         }
     }
 
@@ -48,20 +51,50 @@ impl Analysis {
     }
 
     fn run<O: ObjectModel>(&mut self, o: &O) {
-        for root in o.roots() {
-            self.stats.slots += 1;
-            if *root != 0 {
-                self.stats.non_empty_root_slots += 1;
-                self.create_root_work(*root);
-            } else {
-                self.stats.empty_root_slots += 1;
+        let num_roots = o.roots().len();
+        // Write roots to raw memory for GC workers to use
+        let root_pages_layout =
+            alloc::Layout::from_size_align(num_roots * size_of::<u64>(), 4096).unwrap();
+        // Manually create pages to hold roots on high enough address that MMTk
+        // doesn't use so we have determinism.
+        let root_pages_raw = unsafe {
+            libc::mmap(
+                0xa0000000000 as *mut libc::c_void,
+                root_pages_layout.size(),
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
+                -1,
+                0,
+            )
+        };
+        unsafe {
+            std::ptr::copy(
+                o.roots().as_ptr(),
+                root_pages_raw as *mut u64,
+                o.roots().len(),
+            );
+        }
+        if !self.rle {
+            for i in 0..o.roots().len() {
+                let e = (root_pages_raw as *mut u64).wrapping_add(i);
+                let worker = self.get_owner_thread(e as u64);
+                self.create_root_edges_work(worker, e, 1);
+            }
+        } else {
+            for i in 0..self.num_threads {
+                self.create_root_edges_work(i, root_pages_raw as *mut u64, num_roots as u64);
             }
         }
         let object_sizes = o.object_sizes();
-        // I don't think the OpenJDK heapdump gives any empty roots
-        debug_assert_eq!(self.work_queue.len(), o.roots().len());
+        // If group-slots optimization is not enable, then the work queue
+        // depth should be equal to the number of roots
+        if !self.rle {
+            debug_assert_eq!(self.work_queue.len(), o.roots().len());
+        } else {
+            debug_assert_eq!(self.work_queue.len(), self.num_threads);
+        }
         while let Some(tagged_work) = self.work_queue.pop_front() {
-            self.do_work::<O>(tagged_work, object_sizes);
+            self.do_work(tagged_work, object_sizes);
         }
         debug_assert!(self.work_queue.is_empty());
         // for n in o.objects() {
@@ -70,6 +103,7 @@ impl Analysis {
         //         error!("0x{:x} not marked by transitive closure", n);
         //     }
         // }
+        unsafe { libc::munmap(root_pages_raw, root_pages_layout.size()) };
     }
 }
 
@@ -79,6 +113,11 @@ pub fn reified_analysis<O: ObjectModel>(mut object_model: O, args: Args) -> Resu
     } else {
         panic!("Incorrect dispatch");
     };
+    assert_eq!(
+        args.object_model,
+        ObjectModelChoice::Bidirectional,
+        "The distributed GC work analysis assumes bidirectional for now"
+    );
     let mut analysis = Analysis::from_args(analysis_args);
     for path in &args.paths {
         let p: &Path = path.as_ref();

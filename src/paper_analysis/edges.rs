@@ -19,7 +19,17 @@ impl EdgeChunk {
         usize::BITS - x.leading_zeros()
     }
 
-    fn from_object(obj: &HeapObject) -> Vec<EdgeChunk> {
+    fn from_object(obj: &HeapObject, object_model: ObjectModelChoice) -> Vec<EdgeChunk> {
+        if matches!(object_model, ObjectModelChoice::Bidirectional)
+            || matches!(object_model, ObjectModelChoice::BidirectionalFallback)
+        {
+            let chunk_size = obj.edges.len();
+            return vec![EdgeChunk {
+                chunk_size_log: Self::log2_ceil(chunk_size),
+                edge_count: chunk_size,
+            }];
+        }
+
         if let Some(l) = obj.objarray_length {
             vec![EdgeChunk {
                 chunk_size_log: Self::log2_ceil(l as usize),
@@ -67,7 +77,7 @@ fn merge_counts(count_a: &mut CountMap, count_b: &CountMap) {
     }
 }
 
-fn analyze_one_file(path: &Path) -> Result<CountMap> {
+fn analyze_one_file(path: &Path, object_model: ObjectModelChoice) -> Result<CountMap> {
     let heapdump = HeapDump::from_path(path.to_str().expect("File path should be valid UTF-8"))?;
     let shape_count = heapdump
         .objects
@@ -75,7 +85,7 @@ fn analyze_one_file(path: &Path) -> Result<CountMap> {
         .fold(
             HashMap::new,
             |mut partial_count: CountMap, object: &HeapObject| {
-                let chunks = EdgeChunk::from_object(object);
+                let chunks = EdgeChunk::from_object(object, object_model);
                 chunks.iter().for_each(|c| {
                     *partial_count.entry(c.chunk_size_log).or_default() += c.edge_count
                 });
@@ -90,7 +100,7 @@ fn analyze_one_file(path: &Path) -> Result<CountMap> {
 }
 
 // https://github.com/caizixian/mmtk-core/blob/shape/tools/shapes/shapes.py
-fn analyze_benchmark(bm_path: &Path) -> Result<CountMap> {
+fn analyze_benchmark(bm_path: &Path, object_model: ObjectModelChoice) -> Result<CountMap> {
     let heapdumps: Vec<PathBuf> = fs::read_dir(bm_path)?
         .map(|entry| {
             let entry = entry.unwrap();
@@ -99,7 +109,7 @@ fn analyze_benchmark(bm_path: &Path) -> Result<CountMap> {
         .collect();
     let shape_count: CountMap = heapdumps
         .par_iter()
-        .map(|p| analyze_one_file(p).unwrap())
+        .map(|p| analyze_one_file(p, object_model).unwrap())
         .reduce(HashMap::new, |mut count_a: CountMap, count_b: CountMap| {
             merge_counts(&mut count_a, &count_b);
             count_a
@@ -107,7 +117,11 @@ fn analyze_benchmark(bm_path: &Path) -> Result<CountMap> {
     Ok(shape_count)
 }
 
-pub(super) fn edge_chunks(paths: &[String], analysis_args: PaperAnalysisArgs) -> Result<()> {
+pub(super) fn edge_chunks(
+    paths: &[String],
+    analysis_args: PaperAnalysisArgs,
+    object_model: ObjectModelChoice,
+) -> Result<()> {
     assert_eq!(
         paths.len(),
         1,
@@ -131,7 +145,7 @@ pub(super) fn edge_chunks(paths: &[String], analysis_args: PaperAnalysisArgs) ->
         .par_iter()
         .map(|b| {
             let bm_name = b.file_stem().unwrap().to_str().unwrap();
-            (bm_name, analyze_benchmark(b).unwrap())
+            (bm_name, analyze_benchmark(b, object_model).unwrap())
         })
         .collect();
 

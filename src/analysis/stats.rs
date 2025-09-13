@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use super::Work;
+use std::{collections::HashMap, mem::Discriminant};
 
 /// Statistics about communication in a distributed near-memory GC
 ///
@@ -38,6 +39,7 @@ use std::collections::HashMap;
 /// sent.
 #[derive(Default)]
 pub(super) struct AnalysisStats {
+    num_threads: usize,
     /// Total amount of work
     ///
     /// This is equal to the the number of non-empty slots + invisible slots
@@ -55,12 +57,9 @@ pub(super) struct AnalysisStats {
     pub(super) marked_objects: u64,
     pub(super) los_objects: u64,
     pub(super) los_objarrays: u64,
-    pub(super) completely_visible_objects: u64,
     /// Total number of inter-worker messages sent
-    pub(super) total_msgs: u64,
-    pub(super) msg_process_node: u64,
-    pub(super) msg_process_edge: u64,
-    pub(super) msg_process_edges: u64,
+    pub(super) external_messages: HashMap<(usize, Discriminant<Work>), usize>,
+    pub(super) internal_messages: HashMap<(usize, Discriminant<Work>), usize>,
     /// Total number of slots
     pub(super) slots: u64,
     pub(super) empty_root_slots: u64,
@@ -80,6 +79,13 @@ pub(super) struct AnalysisStats {
 }
 
 impl AnalysisStats {
+    pub(super) fn new(num_threads: usize) -> Self {
+        Self {
+            num_threads,
+            ..Default::default()
+        }
+    }
+
     pub(super) fn print(&self) {
         let mut dist: Vec<(usize, u64)> = self
             .work_dist
@@ -87,11 +93,32 @@ impl AnalysisStats {
             .map(|(worker, work_cnt)| (*worker, *work_cnt))
             .collect();
         dist.sort_by_key(|(worker, _)| *worker);
+        let discriminants: [(Discriminant<Work>, &'static str); 5] = [
+            (std::mem::discriminant(&Work::MarkObject(0)), "MarkObject"),
+            (std::mem::discriminant(&Work::LoadTIB(0)), "LoadTIB"),
+            (
+                std::mem::discriminant(&Work::ScanObject {
+                    tib_ptr: std::ptr::null_mut(),
+                    o: 0,
+                }),
+                "ScanObject",
+            ),
+            (
+                std::mem::discriminant(&Work::ScanRefarray(0)),
+                "ScanRefarray",
+            ),
+            (
+                std::mem::discriminant(&Work::Edges {
+                    start: std::ptr::null_mut(),
+                    count: 0,
+                }),
+                "Edges",
+            ),
+        ];
         println!("============================ Tabulate Statistics ============================");
         print!(
-            "obj\tobj.los\tobj.los.objarray\tobj.complete\t\
+            "obj\tobj.los\tobj.los.objarray\t\
             size\tsize.los\tsize.los.objarray\t\
-            msg\tmsg.pn\tmsg.pe\tmsg.pes\t\
             slots\tslots.vis.empty\tslots.vis.child.vis\tslots.vis.child.invis\t\
             slots.invis.empty\tslots.invis.child.vis\tslots.invis.child.invis\t\
             slots.root.empty\tslots.root.non_empty\t\
@@ -101,11 +128,20 @@ impl AnalysisStats {
         for (x, _) in &dist {
             print!("\twork.{}", x);
         }
+        for (_, ds) in discriminants {
+            for i in 0..self.num_threads {
+                print!("\tinternal_msg.{}.{}", i, ds);
+            }
+        }
+        for (_, ds) in discriminants {
+            for i in 0..self.num_threads {
+                print!("\texternal_msg.{}.{}", i, ds);
+            }
+        }
         println!();
         print!(
-            "{}\t{}\t{}\t{}\t\
+            "{}\t{}\t{}\t\
             {}\t{}\t{}\t\
-            {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t{}\t\
             {}\t{}\t{}\t\
             {}\t{}\t\
@@ -114,14 +150,9 @@ impl AnalysisStats {
             self.marked_objects,
             self.los_objects,
             self.los_objarrays,
-            self.completely_visible_objects,
             self.total_object_size,
             self.los_object_size,
             self.los_objarray_size,
-            self.total_msgs,
-            self.msg_process_node,
-            self.msg_process_edge,
-            self.msg_process_edges,
             self.slots,
             self.visible_empty_slots,
             self.visible_non_empty_slots_visible_child,
@@ -138,6 +169,26 @@ impl AnalysisStats {
         for (_, work_cnt) in &dist {
             print!("\t{}", work_cnt);
         }
+        for (dis, _) in discriminants {
+            for i in 0..self.num_threads {
+                let count = self
+                    .internal_messages
+                    .get(&(i, dis))
+                    .copied()
+                    .unwrap_or_default();
+                print!("\t{}", count);
+            }
+        }
+        for (dis, _) in discriminants {
+            for i in 0..self.num_threads {
+                let count = self
+                    .external_messages
+                    .get(&(i, dis))
+                    .copied()
+                    .unwrap_or_default();
+                print!("\t{}", count);
+            }
+        }
         println!();
         println!("-------------------------- End Tabulate Statistics --------------------------");
         debug_assert_eq!(
@@ -151,10 +202,10 @@ impl AnalysisStats {
                 + self.non_empty_root_slots
                 + self.empty_root_slots
         );
-        debug_assert_eq!(
-            self.total_msgs,
-            self.msg_process_edge + self.msg_process_edges + self.msg_process_node
-        );
+        // debug_assert_eq!(
+        //     self.total_msgs,
+        //     self.msg_process_edge + self.msg_process_edges + self.msg_process_node
+        // );
         debug_assert_eq!(self.total_work, self.work_dist.values().sum::<u64>());
     }
 }

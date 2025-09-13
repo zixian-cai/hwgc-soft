@@ -84,6 +84,22 @@ modifiers:
   p:
     type: ProgramArg
     val: "-p {0}"
+  group_slots:
+    type: ProgramArg
+    val: "--group-slots"
+  rle:
+    type: ProgramArg
+    val: "--rle"
+  eager_load:
+    type: ProgramArg
+    val: "--eager-load"
+  threads:
+    type: ProgramArg
+    val: "--log-num-threads {0}"
+  owner_shift:
+    type: ProgramArg
+    val: "--owner-shift {0}"
+>>>>>>> Conflict 1 of 1 ends
 
 runtimes:
   native:

@@ -13,8 +13,10 @@ pub fn reified_paper_analysis<O: ObjectModel>(mut _object_model: O, args: Args) 
 
     match analysis_args.analysis_name {
         PaperAnalysisChoice::ShapeDemographic => {
-            shape::shape_demographic(&args.paths, analysis_args)
+            shape::shape_demographic(&args.paths, analysis_args, args.object_model)
         }
-        PaperAnalysisChoice::EdgeChunks => edges::edge_chunks(&args.paths, analysis_args),
+        PaperAnalysisChoice::EdgeChunks => {
+            edges::edge_chunks(&args.paths, analysis_args, args.object_model)
+        }
     }
 }

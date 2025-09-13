@@ -47,7 +47,7 @@ lazy_static! {
 #[derive(Debug)]
 pub struct Tib {
     ttype: TibType,
-    num_refs: u64,
+    pub(crate) num_refs: u64,
 }
 
 impl HasTibType for Tib {
@@ -66,8 +66,8 @@ enum StatusByte {
 }
 
 impl Tib {
-    const STATUS_BYTE_OFFSET: u8 = 1;
-    const NUMREFS_BYTE_OFFSET: u8 = 2;
+    pub(crate) const STATUS_BYTE_OFFSET: u8 = 1;
+    pub(crate) const NUMREFS_BYTE_OFFSET: u8 = 2;
 
     fn insert_with_cache(klass: u64, tib: impl FnOnce() -> Tib) -> &'static Tib {
         let mut tibs = TIBS.lock().unwrap();

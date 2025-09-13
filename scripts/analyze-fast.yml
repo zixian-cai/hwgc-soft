@@ -6,17 +6,6 @@ includes:
 overrides:
   "invocations": 1
 
-modifiers:
-  group_slots:
-    type: ProgramArg
-    val: "--group-slots"
-  threads:
-    type: ProgramArg
-    val: "--log-num-threads {0}"
-  owner_shift:
-    type: ProgramArg
-    val: "--owner-shift {0}"
-
 # This for analyzing properties intrinsic to the workload that has nothing
 # to do with visibilities, such as objarrays and large objects,
 configs:

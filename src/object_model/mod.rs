@@ -35,5 +35,6 @@ mod bidirectional;
 mod header;
 mod openjdk;
 pub use bidirectional::BidirectionalObjectModel;
+pub use bidirectional::Tib as BidirectionalTib;
 pub use header::Header;
 pub use openjdk::OpenJDKObjectModel;
