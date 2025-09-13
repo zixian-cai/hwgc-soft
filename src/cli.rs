@@ -10,6 +10,14 @@ pub enum ObjectModelChoice {
     BidirectionalFallback,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all = "verbatim")]
+pub enum VirtualMemoryChoice {
+    Physical,
+    Sv39,
+    Sv48,
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
@@ -71,6 +79,8 @@ pub struct MemdumpArgs {
     pub(crate) output: String,
     #[arg(short, long, value_parser = num_parser)]
     pub(crate) mem_base: usize,
+    #[arg(long)]
+    pub(crate) virtual_memory: VirtualMemoryChoice,
 }
 
 static NUM_PARSER_ERR: &str = "Invalid number. Must be base-10, or start with 0x or 0b.";

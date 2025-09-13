@@ -34,23 +34,36 @@ pub fn dump_mem<O: ObjectModel>(object_model: O, args: Args) -> Result<()> {
         panic!("Incorrect dispatch");
     };
     unsafe {
-        let mut memdump = physical::MemdumpPhysical::new(
-            1024usize * 1024 * 1024 * 4,
-            memdump_args.mem_base as *mut u8,
-        );
-        match memdump_args.workload {
-            cli::MemdumpWorkload::LinkedList => {
-                linked_list::LinkedList::new(1024).gen_memdump(object_model, args, &mut memdump)
+        match memdump_args.virtual_memory {
+            VirtualMemoryChoice::Physical => {
+                let m = physical::MemdumpPhysical::new(
+                    1024usize * 1024 * 1024 * 4,
+                    memdump_args.mem_base as *mut u8,
+                );
+                dump_mem_inner(object_model, args, m);
             }
-            cli::MemdumpWorkload::HeapDump => {
-                heap_dump::HeapDumpWorkload::new().gen_memdump(object_model, args, &mut memdump)
-            }
-            cli::MemdumpWorkload::HeapLinkedList => linked_list::HeapLinkedList::new(
-                1024, 1, 6, None,
-            )
-            .gen_memdump(object_model, args, &mut memdump),
-        }
-        memdump.dump_to_file(&memdump_args.output);
+            _ => unimplemented!(),
+        };
     }
+
     Ok(())
+}
+
+unsafe fn dump_mem_inner<O: ObjectModel, M: Memdump>(object_model: O, args: Args, mut memdump:  M) {
+    let memdump_args = if let Some(Commands::Memdump(ref a)) = args.command {
+        a.clone()
+    } else {
+        panic!("Incorrect dispatch");
+    };
+    match memdump_args.workload {
+        cli::MemdumpWorkload::LinkedList => {
+            linked_list::LinkedList::new(1024).gen_memdump(object_model, args, &mut memdump)
+        }
+        cli::MemdumpWorkload::HeapDump => {
+            heap_dump::HeapDumpWorkload::new().gen_memdump(object_model, args, &mut memdump)
+        }
+        cli::MemdumpWorkload::HeapLinkedList => linked_list::HeapLinkedList::new(1024, 1, 6, None)
+            .gen_memdump(object_model, args, &mut memdump),
+    }
+    memdump.dump_to_file(&memdump_args.output);
 }
