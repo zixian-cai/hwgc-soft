@@ -1,6 +1,7 @@
 use crate::*;
 use anyhow::Result;
 
+mod degrees;
 mod edges;
 mod shape;
 
@@ -17,6 +18,9 @@ pub fn reified_paper_analysis<O: ObjectModel>(mut _object_model: O, args: Args) 
         }
         PaperAnalysisChoice::EdgeChunks => {
             edges::edge_chunks(&args.paths, analysis_args, args.object_model)
+        }
+        PaperAnalysisChoice::Degrees => {
+            degrees::degrees(&args.paths, analysis_args, args.object_model)
         }
     }
 }

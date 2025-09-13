@@ -69,6 +69,7 @@ pub struct PaperAnalysisArgs {
 pub enum PaperAnalysisChoice {
     ShapeDemographic,
     EdgeChunks,
+    Degrees,
 }
 
 /// Simulation args
@@ -96,7 +97,7 @@ pub enum Commands {
     Depth(DepthArgs),
     PaperAnalyze(PaperAnalysisArgs),
     Simulate(SimulationArgs),
-    Export(ExportArgs)
+    Export(ExportArgs),
 }
 
 #[derive(Parser, Debug, Clone)]
@@ -112,4 +113,3 @@ pub struct ExportArgs {
 pub enum ExportFormatChoice {
     CosmographCsv,
 }
-

@@ -21,3 +21,5 @@ target/
 
 # Perfetto traces
 *.json.gz
+# Dataframes
+*.parquet

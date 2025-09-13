@@ -8,7 +8,11 @@ pub fn export<O: ObjectModel>(mut _object_model: O, args: Args) -> Result<()> {
     } else {
         panic!("Incorrect dispatch");
     };
-    assert_eq!(args.paths.len(), 1, "Can only export one heap dump at a time");
+    assert_eq!(
+        args.paths.len(),
+        1,
+        "Can only export one heap dump at a time"
+    );
     let heapdump = HeapDump::from_path(&args.paths[0])?;
     // Open the output file for writing
     let mut output_file = std::fs::File::create(&export_args.output_path)?;
