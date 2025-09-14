@@ -1,11 +1,17 @@
 use super::SimulationArchitecture;
 use crate::{trace::trace_object, *};
-use std::collections::{HashMap, VecDeque};
+use polars::prelude::*;
+use std::{
+    collections::{HashMap, VecDeque},
+    fs::File,
+};
 
 pub(crate) struct IdealTraceUtilization {
     processors: Vec<ITUProcessor>,
     tracing_queue: VecDeque<u64>,
     ticks: usize,
+    frontier_sizes: Vec<u64>, // Polars column can't be usize
+    frontier_ticks: Vec<u64>,
 }
 
 impl SimulationArchitecture for IdealTraceUtilization {
@@ -21,17 +27,39 @@ impl SimulationArchitecture for IdealTraceUtilization {
             processors: vec![ITUProcessor::new(); args.processors],
             tracing_queue: queue,
             ticks: 0,
+            frontier_sizes: vec![],
+            frontier_ticks: vec![],
         }
     }
 
     fn tick<O: ObjectModel>(&mut self) -> bool {
+        // The number of objects in the traversal frontier at the end of the tick
+        // At the end of tick 0, the frontier is the roots
+        if self.ticks % 100 == 0 {
+            self.frontier_sizes.push(self.tracing_queue.len() as u64);
+            self.frontier_ticks.push(self.ticks as u64);
+        }
         self.ticks += 1;
         let mut append_to_queue = Vec::new();
         for processor in &mut self.processors {
             append_to_queue.extend(processor.tick::<O>(self.tracing_queue.pop_front()));
         }
         self.tracing_queue.extend(append_to_queue);
-        self.tracing_queue.is_empty()
+        let terminate = self.tracing_queue.is_empty();
+        if terminate {
+            // Before we terminate, dump the frontier stats
+            self.frontier_sizes.push(self.tracing_queue.len() as u64); // 0 in this case
+            self.frontier_ticks.push(self.ticks as u64);
+            let mut df = df! {
+                "frontier_size" => &self.frontier_sizes,
+                "tick" => &self.frontier_ticks
+            }
+            .unwrap();
+            let file = File::create("ideal_trace_utilization_frontier.parquet").unwrap();
+            let writer = ParquetWriter::new(file);
+            writer.finish(&mut df).unwrap();
+        }
+        terminate
     }
 
     fn stats(&self) -> HashMap<String, f64> {

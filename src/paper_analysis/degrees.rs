@@ -1,10 +1,7 @@
 use crate::*;
 use anyhow::Result;
 use polars::prelude::*;
-use rayon::prelude::*;
-use std::collections::HashMap;
-use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::fs::File;
 
 fn analyze_one_file(heapdump: &HeapDump) -> Result<LazyFrame> {
     // First, build a dataframe of each pointer, with source and target
