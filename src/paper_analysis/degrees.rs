@@ -7,14 +7,20 @@ fn analyze_one_file(heapdump: &HeapDump) -> Result<LazyFrame> {
     // First, build a dataframe of each pointer, with source and target
     let mut sources = vec![];
     let mut targets = vec![];
+    let mut objects = vec![];
     for obj in &heapdump.objects {
+        objects.push(obj.start);
         for edge in &obj.edges {
             if edge.objref != 0 {
-                sources.push(obj.start as i64);
-                targets.push(edge.objref as i64);
+                sources.push(obj.start as u64);
+                targets.push(edge.objref as u64);
             }
         }
     }
+    let object_lf = df! {
+        "source" => objects
+    }?
+    .lazy();
     let lf = df!("source" => sources, "target" => targets)?.lazy();
     let in_degrees_frequency = lf
         .clone()
@@ -31,12 +37,26 @@ fn analyze_one_file(heapdump: &HeapDump) -> Result<LazyFrame> {
             .alias("normalized_weighted_frequency"),
         )
         .with_column(lit("in").alias("degree_type"));
-    let out_degrees_frequency = lf
+    // For each object with some outgoing references, count the out-degree
+    let out_degrees = lf
         .group_by([col("source")])
-        .agg([col("target").count().alias("degree")])
+        .agg([col("target").count().alias("degree")]);
+    // Join with the list of all objects to include those with zero out-degrees
+    let out_degrees = object_lf
+        .left_join(out_degrees, col("source"), col("source"))
+        .with_column(col("degree").fill_null(lit(0u32)));
+    // Now finally compute the out-degree frequency
+    let out_degrees_frequency = out_degrees
         .group_by([col("degree")])
         .agg([col("source").count().alias("degree_frequency")])
-        .with_column((col("degree") * col("degree_frequency")).alias("weighted_frequency"))
+        .with_column(
+            // Treat zero-degree objects as having degree one for weighted frequency
+            (when(col("degree").eq(lit(0u32)))
+                .then(lit(1u32))
+                .otherwise(col("degree"))
+                * col("degree_frequency"))
+            .alias("weighted_frequency"),
+        )
         .with_column(
             (col("weighted_frequency").cast(DataType::Float64)
                 / sum("weighted_frequency").cast(DataType::Float64))
