@@ -4,6 +4,7 @@ use crate::simulate::nmpgc::topology::Topology;
 use crate::util::ticks_to_us;
 use crate::{simulate::memory::AddressMapping, *};
 use std::collections::{HashMap, VecDeque};
+use std::process;
 
 mod topology;
 mod work;
@@ -90,6 +91,18 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             total_read_misses += processor.cache.stats.read_misses;
             total_write_hits += processor.cache.stats.write_hits;
             total_write_misses += processor.cache.stats.write_misses;
+        }
+        // This is to output in a format similar to FireSim simulation
+        for processor in &self.processors {
+            let mut non_idle_work_count = 0;
+            for (work_type, count) in &processor.work_count {
+                if !matches!(work_type, NMPProcessorWorkType::Idle) {
+                    non_idle_work_count += count;
+                }
+            }
+            println!("hart {} in hart group {} finished tracing {} objects in {} cycles, {} instructions",
+                processor.id, processor.id, processor.marked_objects, self.ticks, non_idle_work_count
+            );
         }
         stats.insert("ticks".into(), self.ticks as f64);
         stats.insert("marked_objects.sum".into(), total_marked_objects as f64);
