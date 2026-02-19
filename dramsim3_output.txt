@@ -1,0 +1,15 @@
+hwgc_soft 48e5f56-dirty
+===== DaCapo hwgc-soft "heapdump.2.binpb.zst" starting =====
+hart 0 in hart group 0 finished tracing 10112 objects in 1768908 cycles, 129900 instructions
+hart 1 in hart group 1 finished tracing 10311 objects in 1768908 cycles, 128354 instructions
+hart 2 in hart group 2 finished tracing 12051 objects in 1768908 cycles, 124477 instructions
+hart 3 in hart group 3 finished tracing 10999 objects in 1768908 cycles, 121586 instructions
+hart 4 in hart group 4 finished tracing 13714 objects in 1768908 cycles, 150725 instructions
+hart 5 in hart group 5 finished tracing 12483 objects in 1768908 cycles, 142955 instructions
+hart 6 in hart group 6 finished tracing 11896 objects in 1768908 cycles, 146854 instructions
+hart 7 in hart group 7 finished tracing 11614 objects in 1768908 cycles, 141802 instructions
+===== DaCapo hwgc-soft "heapdump.2.binpb.zst" PASSED in 1961 msec =====
+============================ Tabulate Statistics ============================
+busy_ticks.sum	marked_objects.sum	read_hit_rate	read_hits.sum	read_misses.sum	ticks	time	utilization	write_hit_rate	write_hits.sum	write_misses.sum
+11299082.000	93180.000	0.834	291582.000	58170.000	1768908.000	1.106	0.798	0.261	24346.000	68834.000
+-------------------------- End Tabulate Statistics --------------------------

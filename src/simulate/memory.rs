@@ -45,7 +45,7 @@ pub(super) struct FullyAssociativeCache {
 impl FullyAssociativeCache {
     const HIT_LATENCY: usize = 4;
 
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, rank_option: DDR4RankOption) -> Self {
         assert!(
             capacity >= LINE_SIZE && capacity % LINE_SIZE == 0,
             "Cache capacity must be a multiple of line size"
@@ -53,7 +53,7 @@ impl FullyAssociativeCache {
         FullyAssociativeCache {
             cache: LruCache::new(NonZeroUsize::new(capacity / LINE_SIZE).unwrap()),
             stats: CacheStats::default(),
-            rank: DDR4Rank::default(),
+            rank: DDR4Rank::new(rank_option),
         }
     }
 }
@@ -121,7 +121,7 @@ impl Debug for SetAssociativeCache {
 impl SetAssociativeCache {
     const HIT_LATENCY: usize = 4;
 
-    pub fn new(num_sets: usize, num_ways: usize) -> Self {
+    pub fn new(num_sets: usize, num_ways: usize, rank_option: DDR4RankOption) -> Self {
         assert!(
             num_sets > 0 && num_ways > 0,
             "Number of sets and ways must be greater than zero"
@@ -132,7 +132,7 @@ impl SetAssociativeCache {
         SetAssociativeCache {
             cache_sets,
             stats: CacheStats::default(),
-            rank: DDR4Rank::default(),
+            rank: DDR4Rank::new(rank_option),
         }
     }
 
@@ -310,9 +310,136 @@ impl DDR4RankModel for DDR4RankNaive {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use crate::shim::ffi;
+use std::ffi::CString;
+use std::sync::Mutex;
+
+#[derive(Debug)]
+struct DRAMSim3 {
+    wrapper: *mut ffi::CDRAMSim3,
+}
+
+unsafe impl Send for DRAMSim3 {}
+unsafe impl Sync for DRAMSim3 {} // Mutex requires T: Send, but we might put it in Arc/Mutex. If Mutex, T: Send is enough for Mutex: Sync. Wait, Arc<Mutex<T>> is Send+Sync if T: Send. DDR4RankModel is Sync. DDR4RankDRAMsim3 has Mutex<DRAMSim3>. Mutex<T> is Sync if T: Send. So DRAMSim3 needs Send.
+
+impl DRAMSim3 {
+    fn new(config_file: &str, output_dir: &str) -> Self {
+        let config_file = CString::new(config_file).expect("Config file path contains null byte");
+        let output_dir = CString::new(output_dir).expect("Output dir path contains null byte");
+        let wrapper = unsafe {
+            ffi::new_dramsim3_wrapper(config_file.as_ptr(), output_dir.as_ptr())
+        };
+        Self { wrapper }
+    }
+
+    fn add_transaction(&self, addr: u64, is_write: bool) {
+        unsafe {
+            ffi::dramsim3_add_transaction(self.wrapper, addr, is_write);
+        }
+    }
+
+    fn clock_tick(&self) {
+        unsafe {
+            ffi::dramsim3_clock_tick(self.wrapper);
+        }
+    }
+
+    fn is_transaction_done(&self, addr: u64, is_write: bool) -> bool {
+        unsafe {
+            ffi::dramsim3_is_transaction_done(self.wrapper, addr, is_write)
+        }
+    }
+}
+
+impl Drop for DRAMSim3 {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::delete_dramsim3_wrapper(self.wrapper);
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DDR4RankDRAMsim3 {
+    dramsim3: Mutex<DRAMSim3>,
+    config_file: String,
+    output_dir: String,
+    latency_cache: Mutex<LruCache<u64, usize>>,
+}
+
+impl DDR4RankDRAMsim3 {
+    fn new(config_file: &str, output_dir: &str) -> Self {
+        Self {
+            dramsim3: Mutex::new(DRAMSim3::new(config_file, output_dir)),
+            config_file: config_file.to_string(),
+            output_dir: output_dir.to_string(),
+            latency_cache: Mutex::new(LruCache::new(NonZeroUsize::new(128).unwrap())),
+        }
+    }
+
+    fn run_transaction(&self, addr: u64) -> usize {
+        let dramsim3 = self.dramsim3.lock().unwrap();
+
+        // Add transaction (assuming READ for now as interface doesn't specify)
+        dramsim3.add_transaction(addr, false);
+
+        let mut ticks = 0;
+        loop {
+            dramsim3.clock_tick();
+            ticks += 1;
+            if dramsim3.is_transaction_done(addr, false) {
+                break;
+            }
+            // Safety break
+            if ticks > 1000000 {
+                error!("DRAMsim3 transaction timed out for addr {:#x}", addr);
+                break;
+            }
+        }
+        ticks
+    }
+}
+
+impl DDR4RankModel for DDR4RankDRAMsim3 {
+    fn transaction(&mut self, addr: u64) -> usize {
+        // Check cache first to avoid re-running if verification was just done
+        {
+            let mut cache = self.latency_cache.lock().unwrap();
+            if let Some(latency) = cache.pop(&addr) {
+                return latency;
+            }
+        }
+        self.run_transaction(addr)
+    }
+
+    fn transaction_latency(&self, addr: u64) -> usize {
+        {
+            let mut cache = self.latency_cache.lock().unwrap();
+            if let Some(&latency) = cache.get(&addr) {
+                return latency;
+            }
+        }
+
+        let latency = self.run_transaction(addr);
+
+        {
+            let mut cache = self.latency_cache.lock().unwrap();
+            cache.put(addr, latency);
+        }
+        latency
+    }
+
+    fn clone_box(&self) -> Box<dyn DDR4RankModel> {
+        // Create a new instance with the same configuration.
+        // This effectively gives a fresh memory simulation for the new rank.
+        Box::new(Self::new(&self.config_file, &self.output_dir))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DDR4RankOption {
     Naive,
+    DRAMsim3 { config_file: String, output_dir: String },
 }
 
 impl Default for DDR4RankOption {
@@ -331,6 +458,9 @@ impl DDR4Rank {
         match option {
             DDR4RankOption::Naive => Self {
                 inner: Box::new(DDR4RankNaive::default()),
+            },
+            DDR4RankOption::DRAMsim3 { config_file, output_dir } => Self {
+                inner: Box::new(DDR4RankDRAMsim3::new(&config_file, &output_dir)),
             },
         }
     }
@@ -356,7 +486,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_fully_associative_cache() {
-        let mut cache = FullyAssociativeCache::new(64); // 64 B cache
+        let mut cache = FullyAssociativeCache::new(64, DDR4RankOption::Naive); // 64 B cache
         assert!(cache.read(0x1000) > FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.write(0x1000), FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(0x1000), FullyAssociativeCache::HIT_LATENCY);
@@ -371,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_set_associative_cache() {
-        let mut cache = SetAssociativeCache::new(2, 1); // 2 sets, 1 way each
+        let mut cache = SetAssociativeCache::new(2, 1, DDR4RankOption::Naive); // 2 sets, 1 way each
         assert!(cache.read(0) > SetAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(0), SetAssociativeCache::HIT_LATENCY);
         assert!(cache.read(64) > SetAssociativeCache::HIT_LATENCY);

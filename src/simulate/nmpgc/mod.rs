@@ -2,7 +2,8 @@ use super::SimulationArchitecture;
 use crate::simulate::memory::RankID;
 use crate::simulate::nmpgc::topology::Topology;
 use crate::util::ticks_to_us;
-use crate::{simulate::memory::AddressMapping, *};
+use crate::simulate::memory::{AddressMapping, DDR4RankOption};
+use crate::{ObjectModel, SimulationArgs};
 use std::collections::{HashMap, VecDeque};
 
 mod topology;
@@ -27,10 +28,22 @@ impl<const LOG_NUM_THREADS: u8> NMPGC<LOG_NUM_THREADS> {
 }
 
 impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS> {
-    fn new<O: ObjectModel>(_args: &SimulationArgs, object_model: &O) -> Self {
+    fn new<O: ObjectModel>(args: &SimulationArgs, object_model: &O) -> Self {
+        let rank_option = if args.use_dramsim3 {
+            DDR4RankOption::DRAMsim3 {
+                config_file: args
+                    .dramsim3_config
+                    .clone()
+                    .unwrap_or_else(|| "configs/DDR4_8Gb_x8_3200.ini".to_string()),
+                output_dir: ".".to_string(),
+            }
+        } else {
+            DDR4RankOption::Naive
+        };
+
         // Convert &[u64] into Vec<u64>
         let mut processors: Vec<NMPProcessor<LOG_NUM_THREADS>> = (0..Self::NUM_THREADS)
-            .map(|id| NMPProcessor::new(id as usize))
+            .map(|id| NMPProcessor::new(id as usize, rank_option.clone()))
             .collect();
         for root in object_model.roots() {
             let o = *root;
@@ -131,7 +144,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         stats
     }
 
-    fn events(&self) -> Vec<simulate::tracing::TracingEvent> {
+    fn events(&self) -> Vec<TracingEvent> {
         self.processors.iter().flat_map(|p| p.events()).collect()
     }
 }
@@ -158,7 +171,7 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
 }
 
 impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
-    fn new(id: usize) -> Self {
+    fn new(id: usize, rank_option: DDR4RankOption) -> Self {
         NMPProcessor {
             id,
             busy_ticks: 0,
@@ -169,7 +182,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             stall_ticks: 0,
             ticks: 0,
             // 32 KB
-            cache: SetAssociativeCache::new(64, 8),
+            cache: SetAssociativeCache::new(64, 8, rank_option),
             work_count: HashMap::new(),
             idle_ranges: vec![],
             idle_start: None,

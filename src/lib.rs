@@ -18,6 +18,7 @@ mod probes;
 mod simulate;
 mod trace;
 mod util;
+pub mod shim;
 
 pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

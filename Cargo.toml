@@ -45,6 +45,9 @@ probe = "0.5.1"
 [build-dependencies]
 prost-build = { version = "0.14" }
 built = { version = "0.8", features = ["git2"] }
+cmake = "0.1.57"
+cc = "1.2.56"
+bindgen = { version = "0.72.1", features = ["runtime"] }
 
 [features]
 m5 = []
