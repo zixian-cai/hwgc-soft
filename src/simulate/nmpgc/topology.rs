@@ -5,6 +5,7 @@ pub(super) trait Topology {
     fn get_latency(&self, from: u8, to: u8) -> usize;
 }
 
+#[allow(dead_code)]
 struct FullyConnectedUniformTopology {
     latency: usize,
 }

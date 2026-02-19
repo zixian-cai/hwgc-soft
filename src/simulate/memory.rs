@@ -21,6 +21,7 @@ pub(super) trait DataCache {
 }
 
 const LOG_LINE_SIZE: usize = 6; // Assuming a line size of 64 bytes
+#[allow(dead_code)]
 const LINE_SIZE: usize = 1 << LOG_LINE_SIZE;
 
 fn addr_to_line(addr: u64) -> u64 {
@@ -42,6 +43,7 @@ pub(super) struct FullyAssociativeCache {
     pub(super) stats: CacheStats,
 }
 
+#[allow(dead_code)]
 impl FullyAssociativeCache {
     const HIT_LATENCY: usize = 4;
 
@@ -67,7 +69,7 @@ impl DataCache for FullyAssociativeCache {
         } else {
             self.cache.put(line, ());
             self.stats.read_misses += 1;
-            self.rank.transaction(addr)
+            self.rank.transaction(addr, false)
         }
     }
 
@@ -79,7 +81,7 @@ impl DataCache for FullyAssociativeCache {
         } else {
             self.cache.put(line, ());
             self.stats.write_misses += 1;
-            self.rank.transaction(addr)
+            self.rank.transaction(addr, true)
         }
     }
 
@@ -87,7 +89,7 @@ impl DataCache for FullyAssociativeCache {
         if self.cache.contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            self.rank.transaction_latency(addr)
+            self.rank.transaction_latency(addr, false)
         }
     }
 
@@ -95,7 +97,7 @@ impl DataCache for FullyAssociativeCache {
         if self.cache.contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            self.rank.transaction_latency(addr)
+            self.rank.transaction_latency(addr, true)
         }
     }
 }
@@ -152,7 +154,7 @@ impl DataCache for SetAssociativeCache {
         } else {
             self.cache_sets[set_idx].put(line, ());
             self.stats.read_misses += 1;
-            self.rank.transaction(addr)
+            self.rank.transaction(addr, false)
         }
     }
 
@@ -165,7 +167,7 @@ impl DataCache for SetAssociativeCache {
         } else {
             self.cache_sets[set_idx].put(line, ());
             self.stats.write_misses += 1;
-            self.rank.transaction(addr)
+            self.rank.transaction(addr, true)
         }
     }
 
@@ -174,7 +176,7 @@ impl DataCache for SetAssociativeCache {
         if self.cache_sets[set_idx].contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            self.rank.transaction_latency(addr)
+            self.rank.transaction_latency(addr, false)
         }
     }
 
@@ -183,7 +185,7 @@ impl DataCache for SetAssociativeCache {
         if self.cache_sets[set_idx].contains(&addr_to_line(addr)) {
             Self::HIT_LATENCY
         } else {
-            self.rank.transaction_latency(addr)
+            self.rank.transaction_latency(addr, true)
         }
     }
 }
@@ -241,6 +243,7 @@ impl PartialEq for RankID {
 }
 
 impl RankID {
+    #[allow(dead_code)]
     pub(crate) fn to_dict(&self) -> HashMap<String, Value> {
         let mut dict = HashMap::new();
         dict.insert("channel".to_string(), json!(self.channel()));
@@ -276,8 +279,8 @@ impl BankState {
 }
 
 trait DDR4RankModel: Debug + Send + Sync {
-    fn transaction(&mut self, addr: u64) -> usize;
-    fn transaction_latency(&self, addr: u64) -> usize;
+    fn transaction(&mut self, addr: u64, is_write: bool) -> usize;
+    fn transaction_latency(&self, addr: u64, is_write: bool) -> usize;
     fn clone_box(&self) -> Box<dyn DDR4RankModel>;
 }
 
@@ -287,20 +290,29 @@ impl Clone for Box<dyn DDR4RankModel> {
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Debug, Clone)]
 struct DDR4RankNaive {
-    banks: [BankState; 16], // 16 banks per rank
+    banks: Vec<BankState>,
+}
+
+impl Default for DDR4RankNaive {
+    fn default() -> Self {
+        Self {
+            banks: vec![BankState::default(); 16],
+        }
+    }
 }
 
 impl DDR4RankModel for DDR4RankNaive {
-    fn transaction(&mut self, addr: u64) -> usize {
+    fn transaction(&mut self, addr: u64, _is_write: bool) -> usize {
         let mapping = AddressMapping(addr);
-        let latency = self.transaction_latency(addr);
-        self.banks[mapping.bank() as usize].transaction(addr);
+        let bank_idx = mapping.bank() as usize;
+        let latency = self.banks[bank_idx].transaction_latency(addr);
+        self.banks[bank_idx].transaction(addr);
         latency
     }
 
-    fn transaction_latency(&self, addr: u64) -> usize {
+    fn transaction_latency(&self, addr: u64, _is_write: bool) -> usize {
         let mapping = AddressMapping(addr);
         self.banks[mapping.bank() as usize].transaction_latency(addr)
     }
@@ -319,16 +331,18 @@ struct DRAMSim3 {
     wrapper: *mut ffi::CDRAMSim3,
 }
 
+// DRAMSim3 holds a raw pointer to a C++ object, which is not thread-safe.
+// However, we wrap it in a Mutex, which requires T to be Send.
+// We assert Send because we only move the wrapper between threads, never sharing it
+// concurrently without synchronization (enforced by Mutex).
 unsafe impl Send for DRAMSim3 {}
-unsafe impl Sync for DRAMSim3 {} // Mutex requires T: Send, but we might put it in Arc/Mutex. If Mutex, T: Send is enough for Mutex: Sync. Wait, Arc<Mutex<T>> is Send+Sync if T: Send. DDR4RankModel is Sync. DDR4RankDRAMsim3 has Mutex<DRAMSim3>. Mutex<T> is Sync if T: Send. So DRAMSim3 needs Send.
 
 impl DRAMSim3 {
     fn new(config_file: &str, output_dir: &str) -> Self {
         let config_file = CString::new(config_file).expect("Config file path contains null byte");
         let output_dir = CString::new(output_dir).expect("Output dir path contains null byte");
-        let wrapper = unsafe {
-            ffi::new_dramsim3_wrapper(config_file.as_ptr(), output_dir.as_ptr())
-        };
+        let wrapper =
+            unsafe { ffi::new_dramsim3_wrapper(config_file.as_ptr(), output_dir.as_ptr()) };
         Self { wrapper }
     }
 
@@ -344,10 +358,12 @@ impl DRAMSim3 {
         }
     }
 
+    fn will_accept_transaction(&self, addr: u64, is_write: bool) -> bool {
+        unsafe { ffi::dramsim3_will_accept_transaction(self.wrapper, addr, is_write) }
+    }
+
     fn is_transaction_done(&self, addr: u64, is_write: bool) -> bool {
-        unsafe {
-            ffi::dramsim3_is_transaction_done(self.wrapper, addr, is_write)
-        }
+        unsafe { ffi::dramsim3_is_transaction_done(self.wrapper, addr, is_write) }
     }
 }
 
@@ -364,7 +380,7 @@ struct DDR4RankDRAMsim3 {
     dramsim3: Mutex<DRAMSim3>,
     config_file: String,
     output_dir: String,
-    latency_cache: Mutex<LruCache<u64, usize>>,
+    latency_cache: Mutex<LruCache<(u64, bool), usize>>,
 }
 
 impl DDR4RankDRAMsim3 {
@@ -377,22 +393,42 @@ impl DDR4RankDRAMsim3 {
         }
     }
 
-    fn run_transaction(&self, addr: u64) -> usize {
+    fn run_transaction(&self, addr: u64, is_write: bool) -> usize {
         let dramsim3 = self.dramsim3.lock().unwrap();
 
-        // Add transaction (assuming READ for now as interface doesn't specify)
-        dramsim3.add_transaction(addr, false);
-
         let mut ticks = 0;
+        // Wait until transaction is accepted
+        loop {
+            if dramsim3.will_accept_transaction(addr, is_write) {
+                dramsim3.add_transaction(addr, is_write);
+                break;
+            }
+            dramsim3.clock_tick();
+            ticks += 1;
+            // Safety break for acceptance
+            if ticks > 1000000 {
+                error!(
+                    "DRAMsim3 transaction acceptance timed out for addr {:#x}",
+                    addr
+                );
+                return ticks; // Return what we have, though it failed
+            }
+        }
+
+        // Wait until transaction is done
         loop {
             dramsim3.clock_tick();
             ticks += 1;
-            if dramsim3.is_transaction_done(addr, false) {
+            if dramsim3.is_transaction_done(addr, is_write) {
                 break;
             }
-            // Safety break
-            if ticks > 1000000 {
-                error!("DRAMsim3 transaction timed out for addr {:#x}", addr);
+            // Safety break for completion
+            if ticks > 10000000 {
+                // Increased timeout for completion
+                error!(
+                    "DRAMsim3 transaction completion timed out for addr {:#x}",
+                    addr
+                );
                 break;
             }
         }
@@ -401,30 +437,30 @@ impl DDR4RankDRAMsim3 {
 }
 
 impl DDR4RankModel for DDR4RankDRAMsim3 {
-    fn transaction(&mut self, addr: u64) -> usize {
+    fn transaction(&mut self, addr: u64, is_write: bool) -> usize {
         // Check cache first to avoid re-running if verification was just done
         {
             let mut cache = self.latency_cache.lock().unwrap();
-            if let Some(latency) = cache.pop(&addr) {
+            if let Some(latency) = cache.pop(&(addr, is_write)) {
                 return latency;
             }
         }
-        self.run_transaction(addr)
+        self.run_transaction(addr, is_write)
     }
 
-    fn transaction_latency(&self, addr: u64) -> usize {
+    fn transaction_latency(&self, addr: u64, is_write: bool) -> usize {
         {
             let mut cache = self.latency_cache.lock().unwrap();
-            if let Some(&latency) = cache.get(&addr) {
+            if let Some(&latency) = cache.get(&(addr, is_write)) {
                 return latency;
             }
         }
 
-        let latency = self.run_transaction(addr);
+        let latency = self.run_transaction(addr, is_write);
 
         {
             let mut cache = self.latency_cache.lock().unwrap();
-            cache.put(addr, latency);
+            cache.put((addr, is_write), latency);
         }
         latency
     }
@@ -439,7 +475,10 @@ impl DDR4RankModel for DDR4RankDRAMsim3 {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DDR4RankOption {
     Naive,
-    DRAMsim3 { config_file: String, output_dir: String },
+    DRAMsim3 {
+        config_file: String,
+        output_dir: String,
+    },
 }
 
 impl Default for DDR4RankOption {
@@ -459,18 +498,21 @@ impl DDR4Rank {
             DDR4RankOption::Naive => Self {
                 inner: Box::new(DDR4RankNaive::default()),
             },
-            DDR4RankOption::DRAMsim3 { config_file, output_dir } => Self {
+            DDR4RankOption::DRAMsim3 {
+                config_file,
+                output_dir,
+            } => Self {
                 inner: Box::new(DDR4RankDRAMsim3::new(&config_file, &output_dir)),
             },
         }
     }
 
-    fn transaction(&mut self, addr: u64) -> usize {
-        self.inner.transaction(addr)
+    fn transaction(&mut self, addr: u64, is_write: bool) -> usize {
+        self.inner.transaction(addr, is_write)
     }
 
-    fn transaction_latency(&self, addr: u64) -> usize {
-        self.inner.transaction_latency(addr)
+    fn transaction_latency(&self, addr: u64, is_write: bool) -> usize {
+        self.inner.transaction_latency(addr, is_write)
     }
 }
 

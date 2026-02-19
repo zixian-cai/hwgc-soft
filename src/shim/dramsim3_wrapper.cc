@@ -24,6 +24,11 @@ bool DRAMSim3Wrapper::WillAcceptTransaction(uint64_t addr, bool is_write) {
 }
 
 void DRAMSim3Wrapper::ClockTick() {
+    // We clear completed transactions at the beginning of each tick.
+    // The assumption is that MemorySystem::ClockTick() will eventually trigger
+    // ReadComplete/WriteComplete callbacks within the SAME call stack if a transaction
+    // finishes in this tick.
+    // This allows the Rust side to check IsTransactionDone() immediately after ClockTick().
     completed_transactions_.clear();
     memory_system_->ClockTick();
 }

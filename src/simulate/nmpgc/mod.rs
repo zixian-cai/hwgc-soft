@@ -1,8 +1,8 @@
 use super::SimulationArchitecture;
 use crate::simulate::memory::RankID;
+use crate::simulate::memory::{AddressMapping, DDR4RankOption};
 use crate::simulate::nmpgc::topology::Topology;
 use crate::util::ticks_to_us;
-use crate::simulate::memory::{AddressMapping, DDR4RankOption};
 use crate::{ObjectModel, SimulationArgs};
 use std::collections::{HashMap, VecDeque};
 
@@ -31,11 +31,8 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
     fn new<O: ObjectModel>(args: &SimulationArgs, object_model: &O) -> Self {
         let rank_option = if args.use_dramsim3 {
             DDR4RankOption::DRAMsim3 {
-                config_file: args
-                    .dramsim3_config
-                    .clone()
-                    .unwrap_or_else(|| "configs/DDR4_8Gb_x8_3200.ini".to_string()),
-                output_dir: ".".to_string(),
+                config_file: args.dramsim3_config.clone(),
+                output_dir: std::env::temp_dir().to_string_lossy().into_owned(),
             }
         } else {
             DDR4RankOption::Naive
