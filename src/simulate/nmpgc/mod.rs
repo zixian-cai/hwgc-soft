@@ -4,7 +4,6 @@ use crate::simulate::nmpgc::topology::Topology;
 use crate::util::ticks_to_us;
 use crate::{simulate::memory::AddressMapping, *};
 use std::collections::{HashMap, VecDeque};
-use std::process;
 
 mod topology;
 mod work;

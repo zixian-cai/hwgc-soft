@@ -250,7 +250,7 @@ impl RankID {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 struct BankState {
     current_row: Option<u16>,
 }
@@ -275,12 +275,24 @@ impl BankState {
     }
 }
 
-#[derive(Clone, Default)]
-struct DDR4Rank {
+trait DDR4RankModel: Debug + Send + Sync {
+    fn transaction(&mut self, addr: u64) -> usize;
+    fn transaction_latency(&self, addr: u64) -> usize;
+    fn clone_box(&self) -> Box<dyn DDR4RankModel>;
+}
+
+impl Clone for Box<dyn DDR4RankModel> {
+    fn clone(&self) -> Box<dyn DDR4RankModel> {
+        self.clone_box()
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+struct DDR4RankNaive {
     banks: [BankState; 16], // 16 banks per rank
 }
 
-impl DDR4Rank {
+impl DDR4RankModel for DDR4RankNaive {
     fn transaction(&mut self, addr: u64) -> usize {
         let mapping = AddressMapping(addr);
         let latency = self.transaction_latency(addr);
@@ -291,6 +303,50 @@ impl DDR4Rank {
     fn transaction_latency(&self, addr: u64) -> usize {
         let mapping = AddressMapping(addr);
         self.banks[mapping.bank() as usize].transaction_latency(addr)
+    }
+
+    fn clone_box(&self) -> Box<dyn DDR4RankModel> {
+        Box::new(self.clone())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DDR4RankOption {
+    Naive,
+}
+
+impl Default for DDR4RankOption {
+    fn default() -> Self {
+        Self::Naive
+    }
+}
+
+#[derive(Clone)]
+struct DDR4Rank {
+    inner: Box<dyn DDR4RankModel>,
+}
+
+impl DDR4Rank {
+    fn new(option: DDR4RankOption) -> Self {
+        match option {
+            DDR4RankOption::Naive => Self {
+                inner: Box::new(DDR4RankNaive::default()),
+            },
+        }
+    }
+
+    fn transaction(&mut self, addr: u64) -> usize {
+        self.inner.transaction(addr)
+    }
+
+    fn transaction_latency(&self, addr: u64) -> usize {
+        self.inner.transaction_latency(addr)
+    }
+}
+
+impl Default for DDR4Rank {
+    fn default() -> Self {
+        Self::new(DDR4RankOption::default())
     }
 }
 
