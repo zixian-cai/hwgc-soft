@@ -15,6 +15,7 @@ pub mod m5;
 mod object_model;
 mod paper_analysis;
 mod probes;
+pub(crate) mod shim;
 mod simulate;
 mod trace;
 mod util;

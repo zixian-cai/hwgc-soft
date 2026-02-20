@@ -23,3 +23,8 @@ target/
 *.json.gz
 # Dataframes
 *.parquet
+
+# DRAMSim3 related test outputs
+dramsim3epoch.json
+scripts/naive_output.txt
+scripts/dramsim3_output.txt

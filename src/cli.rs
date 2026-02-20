@@ -81,6 +81,10 @@ pub struct SimulationArgs {
     pub(crate) architecture: SimulationArchitectureChoice,
     #[arg(short, long)]
     pub(crate) trace_path: Option<String>,
+    #[arg(long, default_value_t = false)]
+    pub(crate) use_dramsim3: bool,
+    #[arg(long, default_value = "configs/DDR4_8Gb_x8_3200.ini")]
+    pub(crate) dramsim3_config: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]

@@ -52,7 +52,11 @@ fn get_git_info() -> String {
 
 pub fn main() -> Result<()> {
     env_logger::init();
-    println!("hwgc_soft {}", get_git_info());
+    println!(
+        "hwgc_soft {} (DRAMsim3 {})",
+        get_git_info(),
+        env!("DRAMSIM3_GIT_HASH")
+    );
     let args = Args::parse();
     match args.object_model {
         ObjectModelChoice::OpenJDK => reified_main(OpenJDKObjectModel::<false>::new(), args),
