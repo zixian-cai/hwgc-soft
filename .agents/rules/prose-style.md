@@ -11,3 +11,4 @@ description: When writing prose (documentation, journey files, summaries)
 - **Eliminate redundancy.** Do not repeat the same fact in different words across adjacent sentences.
 - **Be specific.** Replace vague phrases ("the relevant configuration") with concrete names (`columns = 1024`). Use exact function names, file paths, and values.
 - **Verify every claim against the code.** If you reference a type, function, or mechanism, confirm it matches the current codebase. Do not guess.
+- **Do NOT** add an extra new line after a section header in Markdown
