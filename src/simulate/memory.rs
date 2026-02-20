@@ -35,6 +35,7 @@ pub(super) struct CacheStats {
     pub(super) write_misses: usize,
 }
 
+#[allow(dead_code)]
 pub(super) struct FullyAssociativeCache {
     cache: LruCache<u64, ()>, // We don't actually care about the content, just what's in the cache,
     rank: DDR4Rank,

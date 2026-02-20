@@ -44,6 +44,20 @@ fn main() {
             dramsim3_src
         );
     } else {
+        // Capture DRAMsim3 git hash at build time
+        let dramsim3_hash = std::process::Command::new("git")
+            .args(["rev-parse", "--short", "HEAD"])
+            .current_dir(&dramsim3_src)
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        println!("cargo:rustc-env=DRAMSIM3_GIT_HASH={}", dramsim3_hash);
+        println!(
+            "cargo:rerun-if-changed={}",
+            dramsim3_src.join(".git/HEAD").display()
+        );
         let dst = cmake::Config::new(&dramsim3_src)
             .define("CMAKE_BUILD_TYPE", "Release")
             // We explicitly build the 'dramsim3' target.

@@ -33,7 +33,7 @@ Use this to verify that your refactoring does not change any behavior.
 The simulator supports an optional DRAMsim3 backend (`--use-dramsim3`) for cycle-accurate memory modelling.
 The DRAMsim3 source lives in `../DRAMsim3/` and is linked at build time via `build.rs`.
 
-The address mapping between `hwgc-soft` (`AddressMapping` bitfield in `src/simulate/memory.rs`) and DRAMsim3 (`SetAddressMapping()` in `DRAMsim3/src/configuration.cc`) must be kept in alignment.
+The address mapping between `hwgc-soft` (`AddressMapping` bitfield in `src/simulate/memory.rs`) and DRAMsim3 (defined in `.ini` config files parsed by `SetAddressMapping()` in `DRAMsim3/src/configuration.cc`) must be kept in alignment.
 DRAMsim3 dumps the computed DRAM organization (page size, rank count, capacity) and a human-readable bit-field layout at startup for verification.
 DRAMsim3's debug output uses `static bool` guards to print only once even when the config is loaded per-rank.
 
