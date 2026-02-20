@@ -1,7 +1,6 @@
 use super::SimulationArchitecture;
 use crate::simulate::memory::RankID;
 use crate::simulate::memory::{AddressMapping, DDR4RankOption};
-use crate::simulate::nmpgc::topology::Topology;
 use crate::util::ticks_to_us;
 use crate::{ObjectModel, SimulationArgs};
 use std::collections::{HashMap, VecDeque};
@@ -10,7 +9,7 @@ mod topology;
 mod work;
 use work::{NMPMessage, NMPProcessorWork, NMPProcessorWorkType};
 
-use super::memory::{DataCache, SetAssociativeCache};
+use super::memory::SetAssociativeCache;
 use super::tracing::TracingEvent;
 
 pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
@@ -105,7 +104,12 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         for processor in &self.processors {
             let mut non_idle_work_count = 0;
             for (work_type, count) in &processor.work_count {
-                if !matches!(work_type, NMPProcessorWorkType::Idle) {
+                if !matches!(
+                    work_type,
+                    NMPProcessorWorkType::Idle | NMPProcessorWorkType::Stall
+                ) {
+                    // Count what would logically be consindered as instructions
+                    // Excluding stalls and idle
                     non_idle_work_count += count;
                 }
             }
@@ -155,8 +159,6 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     marked_objects: usize,
     inbox: Vec<NMPMessage>,
     works: VecDeque<NMPProcessorWork>,
-    stalled_work: Option<NMPProcessorWork>,
-    stall_ticks: usize,
     pub(super) cache: SetAssociativeCache,
     work_count: HashMap<NMPProcessorWorkType, usize>,
     idle_ranges: Vec<(usize, usize)>,
@@ -175,8 +177,6 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             marked_objects: 0,
             inbox: vec![],
             works: VecDeque::new(),
-            stalled_work: None,
-            stall_ticks: 0,
             ticks: 0,
             // 32 KB
             cache: SetAssociativeCache::new(64, 8, rank_option),
@@ -191,21 +191,8 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         }
     }
 
-    fn get_latency(&self, work: &NMPProcessorWork) -> usize {
-        match work {
-            NMPProcessorWork::Mark(o) => self.cache.write_latency(*o),
-            NMPProcessorWork::Idle => 1,
-            NMPProcessorWork::Load(e) => self.cache.read_latency(*e as u64),
-            NMPProcessorWork::ReadInbox => 2,
-            NMPProcessorWork::SendMessage(m) => {
-                self.topology.get_latency(self.id as u8, m.recipient as u8)
-            }
-            NMPProcessorWork::ContinueScan => 1,
-        }
-    }
-
     fn locally_done(&self) -> bool {
-        self.works.is_empty() && self.stalled_work.is_none() && self.inbox.is_empty()
+        self.works.is_empty() && self.inbox.is_empty()
     }
 
     fn to_thread_name_event(&self) -> TracingEvent {

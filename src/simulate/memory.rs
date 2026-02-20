@@ -10,14 +10,12 @@ use std::num::NonZeroUsize;
 // heapdumps feed virtual addresses, and the higher bits are ignored.
 // This messes with the row conflict modelling.
 pub(super) trait DataCache {
+    /// Cache hit latency in cycles.
+    const HIT_LATENCY: usize = 4;
     /// Reads a word from the cache, returning the latency.
     fn read(&mut self, addr: u64) -> usize;
-    /// Check would-be read latency without modifying the cache.
-    fn read_latency(&self, addr: u64) -> usize;
     /// Writes a word to the cache, returning the latency.
     fn write(&mut self, addr: u64) -> usize;
-    /// Check would-be write latency without modifying the cache.
-    fn write_latency(&self, addr: u64) -> usize;
 }
 
 const LOG_LINE_SIZE: usize = 6; // Assuming a line size of 64 bytes
@@ -43,8 +41,6 @@ pub(super) struct FullyAssociativeCache {
 }
 
 impl FullyAssociativeCache {
-    const HIT_LATENCY: usize = 4;
-
     pub fn new(capacity: usize, rank_option: DDR4RankOption) -> Self {
         assert!(
             capacity >= LINE_SIZE && capacity % LINE_SIZE == 0,
@@ -67,36 +63,22 @@ impl DataCache for FullyAssociativeCache {
         } else {
             self.cache.put(line, ());
             self.stats.read_misses += 1;
-            self.rank.transaction(addr, false)
+            Self::HIT_LATENCY + self.rank.transaction(addr, false)
         }
     }
 
+    /// Write-through: every write is forwarded to DRAM regardless of cache
+    /// state. The cache line is allocated (write-allocate) so subsequent reads
+    /// can hit.
     fn write(&mut self, addr: u64) -> usize {
         let line = addr_to_line(addr);
         if self.cache.get(&line).is_some() {
             self.stats.write_hits += 1;
-            Self::HIT_LATENCY
         } else {
             self.cache.put(line, ());
             self.stats.write_misses += 1;
-            self.rank.transaction(addr, true)
         }
-    }
-
-    fn read_latency(&self, addr: u64) -> usize {
-        if self.cache.contains(&addr_to_line(addr)) {
-            Self::HIT_LATENCY
-        } else {
-            self.rank.transaction_latency(addr, false)
-        }
-    }
-
-    fn write_latency(&self, addr: u64) -> usize {
-        if self.cache.contains(&addr_to_line(addr)) {
-            Self::HIT_LATENCY
-        } else {
-            self.rank.transaction_latency(addr, true)
-        }
+        Self::HIT_LATENCY + self.rank.transaction(addr, true)
     }
 }
 
@@ -119,8 +101,6 @@ impl Debug for SetAssociativeCache {
 }
 
 impl SetAssociativeCache {
-    const HIT_LATENCY: usize = 4;
-
     pub fn new(num_sets: usize, num_ways: usize, rank_option: DDR4RankOption) -> Self {
         assert!(
             num_sets > 0 && num_ways > 0,
@@ -152,39 +132,23 @@ impl DataCache for SetAssociativeCache {
         } else {
             self.cache_sets[set_idx].put(line, ());
             self.stats.read_misses += 1;
-            self.rank.transaction(addr, false)
+            Self::HIT_LATENCY + self.rank.transaction(addr, false)
         }
     }
 
+    /// Write-through: every write is forwarded to DRAM regardless of cache
+    /// state. The cache line is allocated (write-allocate) so subsequent reads
+    /// can hit.
     fn write(&mut self, addr: u64) -> usize {
         let set_idx = self.get_set_idx(addr);
         let line = addr_to_line(addr);
         if self.cache_sets[set_idx].get(&line).is_some() {
             self.stats.write_hits += 1;
-            Self::HIT_LATENCY
         } else {
             self.cache_sets[set_idx].put(line, ());
             self.stats.write_misses += 1;
-            self.rank.transaction(addr, true)
         }
-    }
-
-    fn read_latency(&self, addr: u64) -> usize {
-        let set_idx = self.get_set_idx(addr);
-        if self.cache_sets[set_idx].contains(&addr_to_line(addr)) {
-            Self::HIT_LATENCY
-        } else {
-            self.rank.transaction_latency(addr, false)
-        }
-    }
-
-    fn write_latency(&self, addr: u64) -> usize {
-        let set_idx = self.get_set_idx(addr);
-        if self.cache_sets[set_idx].contains(&addr_to_line(addr)) {
-            Self::HIT_LATENCY
-        } else {
-            self.rank.transaction_latency(addr, true)
-        }
+        Self::HIT_LATENCY + self.rank.transaction(addr, true)
     }
 }
 
@@ -256,14 +220,10 @@ struct BankState {
 }
 
 impl BankState {
-    fn transaction(&mut self, addr: u64) {
+    /// Performs a transaction and returns the latency in cycles.
+    fn transaction(&mut self, addr: u64) -> usize {
         let mapping = AddressMapping(addr);
-        self.current_row = Some(mapping.row());
-    }
-
-    fn transaction_latency(&self, addr: u64) -> usize {
-        let mapping = AddressMapping(addr);
-        if self.current_row.is_none() || self.current_row.unwrap() != mapping.row() {
+        let latency = if self.current_row.is_none() || self.current_row.unwrap() != mapping.row() {
             // DDR4-3200 Speed Bin -062Y
             // https://www.mouser.com/datasheet/2/671/Micron_05092023_8gb_ddr4_sdram-3175546.pdf
             //  tRP + tRCD + tCAS + 4 (double data rate, and burst of 8)
@@ -271,13 +231,14 @@ impl BankState {
         } else {
             // tCAS + 4 (double data rate, and burst of 8)
             22 + 4
-        }
+        };
+        self.current_row = Some(mapping.row());
+        latency
     }
 }
 
 trait DDR4RankModel: Debug + Send + Sync {
     fn transaction(&mut self, addr: u64, is_write: bool) -> usize;
-    fn transaction_latency(&self, addr: u64, is_write: bool) -> usize;
     fn clone_box(&self) -> Box<dyn DDR4RankModel>;
 }
 
@@ -304,14 +265,7 @@ impl DDR4RankModel for DDR4RankNaive {
     fn transaction(&mut self, addr: u64, _is_write: bool) -> usize {
         let mapping = AddressMapping(addr);
         let bank_idx = mapping.bank() as usize;
-        let latency = self.banks[bank_idx].transaction_latency(addr);
-        self.banks[bank_idx].transaction(addr);
-        latency
-    }
-
-    fn transaction_latency(&self, addr: u64, _is_write: bool) -> usize {
-        let mapping = AddressMapping(addr);
-        self.banks[mapping.bank() as usize].transaction_latency(addr)
+        self.banks[bank_idx].transaction(addr)
     }
 
     fn clone_box(&self) -> Box<dyn DDR4RankModel> {
@@ -377,7 +331,6 @@ struct DDR4RankDRAMsim3 {
     dramsim3: Mutex<DRAMSim3>,
     config_file: String,
     output_dir: String,
-    latency_cache: Mutex<LruCache<(u64, bool), usize>>,
 }
 
 impl DDR4RankDRAMsim3 {
@@ -386,7 +339,6 @@ impl DDR4RankDRAMsim3 {
             dramsim3: Mutex::new(DRAMSim3::new(config_file, output_dir)),
             config_file: config_file.to_string(),
             output_dir: output_dir.to_string(),
-            latency_cache: Mutex::new(LruCache::new(NonZeroUsize::new(128).unwrap())),
         }
     }
 
@@ -435,31 +387,7 @@ impl DDR4RankDRAMsim3 {
 
 impl DDR4RankModel for DDR4RankDRAMsim3 {
     fn transaction(&mut self, addr: u64, is_write: bool) -> usize {
-        // Check cache first to avoid re-running if verification was just done
-        {
-            let mut cache = self.latency_cache.lock().unwrap();
-            if let Some(latency) = cache.pop(&(addr, is_write)) {
-                return latency;
-            }
-        }
         self.run_transaction(addr, is_write)
-    }
-
-    fn transaction_latency(&self, addr: u64, is_write: bool) -> usize {
-        {
-            let mut cache = self.latency_cache.lock().unwrap();
-            if let Some(&latency) = cache.get(&(addr, is_write)) {
-                return latency;
-            }
-        }
-
-        let latency = self.run_transaction(addr, is_write);
-
-        {
-            let mut cache = self.latency_cache.lock().unwrap();
-            cache.put((addr, is_write), latency);
-        }
-        latency
     }
 
     fn clone_box(&self) -> Box<dyn DDR4RankModel> {
@@ -507,10 +435,6 @@ impl DDR4Rank {
     fn transaction(&mut self, addr: u64, is_write: bool) -> usize {
         self.inner.transaction(addr, is_write)
     }
-
-    fn transaction_latency(&self, addr: u64, is_write: bool) -> usize {
-        self.inner.transaction_latency(addr, is_write)
-    }
 }
 
 impl Default for DDR4Rank {
@@ -527,10 +451,11 @@ mod tests {
     fn test_fully_associative_cache() {
         let mut cache = FullyAssociativeCache::new(64, DDR4RankOption::Naive); // 64 B cache
         assert!(cache.read(0x1000) > FullyAssociativeCache::HIT_LATENCY);
-        assert_eq!(cache.write(0x1000), FullyAssociativeCache::HIT_LATENCY);
+        // Write-through: write always goes to DRAM, even on a cache hit
+        assert!(cache.write(0x1000) > FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.read(0x1000), FullyAssociativeCache::HIT_LATENCY);
         assert!(cache.read(0x2000) > FullyAssociativeCache::HIT_LATENCY);
-        assert_eq!(cache.write(0x2000), FullyAssociativeCache::HIT_LATENCY);
+        assert!(cache.write(0x2000) > FullyAssociativeCache::HIT_LATENCY);
         assert!(cache.read(0x1000) > FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.stats.read_hits, 1);
         assert_eq!(cache.stats.read_misses, 3);
@@ -559,19 +484,22 @@ mod tests {
     fn test_bank_state() {
         let mut bank_state = BankState::default();
         let addr = 0b0_0_0000000_000000;
-        assert_eq!(bank_state.transaction_latency(addr), 22 + 22 + 22 + 4);
-        bank_state.transaction(addr);
+        // First access to a new row: row miss
+        assert_eq!(bank_state.transaction(addr), 22 + 22 + 22 + 4);
         assert_eq!(bank_state.current_row, Some(0));
-        assert_eq!(bank_state.transaction_latency(addr), 22 + 4);
-        // Differnt row
+        // Same row: row hit
+        assert_eq!(bank_state.transaction(addr), 22 + 4);
+        // Different row: row miss
         let addr = 0b1_00_0000_0_0000000_000000;
-        assert_eq!(bank_state.transaction_latency(addr), 22 + 22 + 22 + 4);
-        bank_state.transaction(addr);
+        assert_eq!(bank_state.transaction(addr), 22 + 22 + 22 + 4);
         assert_eq!(bank_state.current_row, Some(1));
-        assert_eq!(bank_state.transaction_latency(addr), 22 + 4);
+        // Same row: row hit
+        assert_eq!(bank_state.transaction(addr), 22 + 4);
+        // Back to row 0: row miss
         let addr = 0b0_0_0000000_000000;
-        assert_eq!(bank_state.transaction_latency(addr), 22 + 22 + 22 + 4);
-        let addr = 0b1_00_0000_0_0000001_000000;
-        assert_eq!(bank_state.transaction_latency(addr), 22 + 4);
+        assert_eq!(bank_state.transaction(addr), 22 + 22 + 22 + 4);
+        // Same row (row 0), different column: row hit
+        let addr = 0b0_00_0000_0_0000001_000000;
+        assert_eq!(bank_state.transaction(addr), 22 + 4);
     }
 }

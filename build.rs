@@ -1,6 +1,49 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
+/// Finds the highest-versioned libstdc++ include directories on the system.
+/// Returns clang `-I` arguments for both the generic and architecture-specific
+/// include paths, plus `/usr/include` as a fallback.
+fn find_libstdcpp_includes() -> Vec<String> {
+    let mut args = Vec::new();
+
+    let base = Path::new("/usr/include/c++");
+    if let Some(version) = highest_version_dir(base) {
+        let generic = base.join(&version);
+        println!(
+            "cargo:warning=Setting libstdc++ include path to {}",
+            generic.display()
+        );
+        args.push(format!("-I{}", generic.display()));
+
+        let arch_specific = Path::new("/usr/include/x86_64-linux-gnu/c++").join(&version);
+        if arch_specific.exists() {
+            args.push(format!("-I{}", arch_specific.display()));
+        }
+    } else {
+        println!("cargo:warning=Could not find libstdc++ includes under /usr/include/c++");
+    }
+
+    args.push("-I/usr/include".to_string());
+    args
+}
+
+/// Returns the name of the highest-versioned subdirectory (by numeric sort).
+fn highest_version_dir(base: &Path) -> Option<String> {
+    let mut versions: Vec<(u32, String)> = std::fs::read_dir(base)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let major = name.split('.').next()?.parse::<u32>().ok()?;
+            Some((major, name))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    versions.into_iter().next().map(|(_, name)| name)
+}
+
 fn main() {
     prost_build::compile_protos(&["./src/heapdump.proto"], &["./src"]).unwrap();
 
@@ -68,19 +111,20 @@ fn main() {
             .build();
 
         println!("cargo:rustc-link-search=native={}/build", dst.display());
-        println!("cargo:rustc-link-lib=static=dramsim3");
-        println!("cargo:rustc-link-lib=dylib=stdc++");
 
-        // Build the wrapper
+        // Build the wrapper. cc::Build emits `cargo:rustc-link-lib=static=dramsim3_wrapper`
+        // automatically, so we only need to add its dependencies afterwards.
         cc::Build::new()
             .cpp(true)
             .file("src/shim/dramsim3_wrapper.cc")
-            .include(&dramsim3_src.join("src"))
+            .include(dramsim3_src.join("src"))
             .include("src/shim")
             .flag("-std=c++11")
             .compile("dramsim3_wrapper");
 
-        println!("cargo:rustc-link-lib=static=dramsim3_wrapper");
+        // Link order matters: dramsim3_wrapper depends on dramsim3, which depends on stdc++.
+        println!("cargo:rustc-link-lib=static=dramsim3");
+        println!("cargo:rustc-link-lib=dylib=stdc++");
         println!("cargo:rerun-if-changed=src/shim/dramsim3_wrapper.cc");
         println!("cargo:rerun-if-changed=src/shim/dramsim3_wrapper.h");
         println!(
@@ -99,9 +143,7 @@ fn main() {
             .clang_arg("-x")
             .clang_arg("c++")
             .clang_arg("-std=c++14")
-            .clang_arg("-I/usr/include/c++/15")
-            .clang_arg("-I/usr/include/x86_64-linux-gnu/c++/15")
-            .clang_arg("-I/usr/include")
+            .clang_args(find_libstdcpp_includes())
             .allowlist_function("new_dramsim3_wrapper")
             .allowlist_function("dramsim3_add_transaction")
             .allowlist_function("dramsim3_clock_tick")

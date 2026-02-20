@@ -1,9 +1,10 @@
 use super::NMPProcessor;
 use crate::{
-    simulate::{memory::DataCache, nmpgc::NMPGC},
+    simulate::{memory::DataCache, nmpgc::topology::Topology, nmpgc::NMPGC},
     trace::trace_object,
     *,
 };
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone)]
 /// Each processor generates at most one message per tick
@@ -26,6 +27,8 @@ pub(super) enum NMPProcessorWork {
     ReadInbox,
     SendMessage(NMPMessage),
     ContinueScan,
+    /// Placeholder work representing remaining stall cycles from a previous operation.
+    Stall(usize),
 }
 
 #[repr(u8)]
@@ -37,6 +40,7 @@ pub(super) enum NMPProcessorWorkType {
     ReadInbox = 3,
     SendMessage = 4,
     ContinueScan = 5,
+    Stall = 6,
 }
 
 impl NMPProcessorWork {
@@ -48,7 +52,15 @@ impl NMPProcessorWork {
             NMPProcessorWork::ReadInbox => NMPProcessorWorkType::ReadInbox,
             NMPProcessorWork::SendMessage(_) => NMPProcessorWorkType::SendMessage,
             NMPProcessorWork::ContinueScan => NMPProcessorWorkType::ContinueScan,
+            NMPProcessorWork::Stall(_) => NMPProcessorWorkType::Stall,
         }
+    }
+}
+
+/// Inserts `Stall` items at the front of the work queue if `latency > 1`.
+fn push_stall(works: &mut VecDeque<NMPProcessorWork>, latency: usize) {
+    if latency > 1 {
+        works.push_front(NMPProcessorWork::Stall(latency - 1));
     }
 }
 
@@ -56,43 +68,26 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
     pub(super) fn tick<O: ObjectModel>(&mut self) -> Option<NMPMessage> {
         self.ticks += 1;
 
-        // This is to deal with the latencies of actions that take more than one tick
-        if self.stall_ticks > 0 {
-            self.stall_ticks -= 1;
+        let work = self.works.pop_front().unwrap_or(NMPProcessorWork::Idle);
+
+        // Stall: the processor is busy waiting for a previous operation to complete
+        if let NMPProcessorWork::Stall(remaining) = work {
             self.busy_ticks += 1;
+            self.work_count
+                .entry(NMPProcessorWorkType::Stall)
+                .and_modify(|e| *e += 1)
+                .or_insert(1);
+            if remaining > 1 {
+                self.works
+                    .push_front(NMPProcessorWork::Stall(remaining - 1));
+            }
             trace!(
-                "[P{}] stalled for {:?}, {} ticks left",
+                "[P{}] stalling, {} ticks left",
                 self.id,
-                self.stalled_work,
-                self.stall_ticks
+                remaining.saturating_sub(1)
             );
             return None;
         }
-
-        let work = if let Some(w) = self.stalled_work.take() {
-            trace!("[P{}] executing previously stalled work: {:?}", self.id, w);
-            // Act on the stalled work
-            w
-        } else {
-            if let Some(w) = self.works.pop_front() {
-                if self.get_latency(&w) > 1 {
-                    // If the work takes more than one tick, stall it
-                    self.stall_ticks = self.get_latency(&w) - 1; // -1 because we are already in this tick
-                    self.stalled_work = Some(w);
-                    trace!(
-                        "[P{}] stalling work: {:?}, {} ticks left",
-                        self.id,
-                        self.stalled_work,
-                        self.stall_ticks
-                    );
-                    return None;
-                } else {
-                    w
-                }
-            } else {
-                NMPProcessorWork::Idle
-            }
-        };
 
         if !matches!(work, NMPProcessorWork::Idle) {
             self.busy_ticks += 1;
@@ -114,8 +109,10 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         match work {
             NMPProcessorWork::Mark(o) => {
                 trace!("[P{}] marking object {}", self.id, o);
+                let read_latency = self.cache.read(o);
                 if unsafe { trace_object(o, 1) } {
-                    self.cache.write(o);
+                    let write_latency = self.cache.write(o);
+                    push_stall(&mut self.works, read_latency + write_latency);
                     self.marked_objects += 1;
                     O::scan_object(o, |edge, repeat| {
                         // To avoid edges getting dereferenced when there's no edge
@@ -130,11 +127,14 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                         // and disrupts the current scanning process
                         self.works.push_front(NMPProcessorWork::ContinueScan);
                     }
+                } else {
+                    push_stall(&mut self.works, read_latency);
                 }
             }
             NMPProcessorWork::Load(e) => {
                 let child = unsafe { *e };
-                self.cache.read(e as u64);
+                let latency = self.cache.read(e as u64);
+                push_stall(&mut self.works, latency);
                 if child != 0 {
                     let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(child);
                     if owner == self.id {
@@ -160,6 +160,10 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 }
             }
             NMPProcessorWork::SendMessage(msg) => {
+                let latency = self
+                    .topology
+                    .get_latency(self.id as u8, msg.recipient as u8);
+                push_stall(&mut self.works, latency);
                 trace!(
                     "[P{}] sending message to P{}: {:?}",
                     self.id,
@@ -169,6 +173,8 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 ret = Some(msg);
             }
             NMPProcessorWork::ReadInbox => {
+                // FIXME: hardcoded latency for ReadInbox
+                push_stall(&mut self.works, 2);
                 if let Some(msg) = self.inbox.pop() {
                     trace!("[P{}] reading inbox message: {:?}", self.id, msg);
                     match msg.work {
@@ -211,13 +217,13 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                     self.edge_chunk_cursor = (0, 0);
                 }
             }
+            NMPProcessorWork::Stall(_) => unreachable!("handled above"),
         }
         trace!(
-            "[P{}] work count: {:?}, inbox count: {:?}, stalled_work: {:?}, marked_objects: {:?}",
+            "[P{}] work count: {:?}, inbox count: {:?}, marked_objects: {:?}",
             self.id,
             self.works.len(),
             self.inbox.len(),
-            self.stalled_work,
             self.marked_objects
         );
         ret

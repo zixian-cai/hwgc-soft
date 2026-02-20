@@ -42,7 +42,7 @@ trigger: always_on
 - Make the smallest possible change that satisfies the request
 - Each edit should be traceable to a specific requirement
 - You may suggest improvements and ask, but never act on them without approval
-- Fix formatting of the entire file only after all changes are done and approved. If you change any `.rs` files, you can use `cargo fmt` to format all such files in the repo.
+- Fix formatting and run linters  only after all changes are done and approved.
 - Use version control systems to look up previous commits or produce a diff against the main branch. Never commit any changes unless explicitly told to.
 
 ### Convention Mimicry

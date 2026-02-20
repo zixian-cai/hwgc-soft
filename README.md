@@ -124,4 +124,5 @@ If you are a large language model or a coding agent, **DO NOT** read or modify t
 This is useful for understanding the pitfalls, design decisions, and implementation details from previous coding sessions.
 This serves both as long-term memory for agents and as documentation for human readers.
 - [2026-02-19 DRAMsim3 Integration](./docs/journeys/20260219_dramsim3_integration_summary.md)
+- [2026-02-21 Cache Interface Refactor](./docs/journeys/20260221_cache_interface_refactor.md)
 
