@@ -63,6 +63,9 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let topology: Box<dyn Topology> = match args.topology {
             crate::cli::TopologyChoice::Line => Box::new(topology::LineTopology::new()),
             crate::cli::TopologyChoice::Ring => Box::new(topology::RingTopology::new()),
+            crate::cli::TopologyChoice::FullyConnected => {
+                Box::new(topology::FullyConnectedTopology::new(4))
+            }
         };
         let network = Network::new(&*topology);
         let dimm_to_rank_latency = network::DIMM_TO_RANK_LATENCY;

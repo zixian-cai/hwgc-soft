@@ -14,7 +14,24 @@ pub(super) trait Topology: Debug {
 
     /// Prints a human-readable connection diagram showing DIMMs, their
     /// ranks, and how they are connected.
-    fn print_diagram(&self);
+    fn print_diagram(&self) {
+        let n = self.get_num_dimms();
+        let links = self.get_links();
+        let mut adj = vec![Vec::new(); n as usize];
+        for &(u, v) in &links {
+            adj[u as usize].push(v);
+            adj[v as usize].push(u);
+        }
+
+        println!("Topology ({:?}):", self);
+        for u in 0..n {
+            let mut neighbors = adj[u as usize].clone();
+            neighbors.sort();
+            let neighbor_labels: Vec<String> =
+                neighbors.iter().map(|&v| format!("DIMM{}", v)).collect();
+            println!("  {} <-> [{}]", dimm_label(u), neighbor_labels.join(", "));
+        }
+    }
 
     /// Returns a sort key for a directed link so that link stats can be
     /// printed in physical arrangement order. The key is `(group, is_reverse)`
@@ -23,17 +40,25 @@ pub(super) trait Topology: Debug {
     fn link_sort_key(&self, from_dimm: u8, to_dimm: u8) -> (usize, bool);
 }
 
-/// Builds a label for a DIMM showing its ID and the processor/rank IDs on it.
+/// Builds a label for a DIMM showing its ID, physical location, and the processor/rank IDs on it.
 fn dimm_label(dimm_id: u8) -> String {
     let mut ranks = Vec::new();
+    let channel = dimm_id & 1;
+    let local_dimm = (dimm_id >> 1) & 1;
     for rank_bit in 0..2u8 {
         let mut rid = RankID(0);
-        rid.set_channel(dimm_id & 1);
-        rid.set_dimm((dimm_id >> 1) & 1);
+        rid.set_channel(channel);
+        rid.set_dimm(local_dimm);
         rid.set_rank(rank_bit);
         ranks.push(format!("P{}", rid.0));
     }
-    format!("DIMM{}({})", dimm_id, ranks.join(","))
+    format!(
+        "DIMM{} (C{}-D{}) [{}]",
+        dimm_id,
+        channel,
+        local_dimm,
+        ranks.join(",")
+    )
 }
 
 // ─── Line Topology ──────────────────────────────────────────────────────────
@@ -70,7 +95,6 @@ impl Debug for LineTopology {
 }
 
 impl Topology for LineTopology {
-
     fn get_route(&self, from_dimm: u8, to_dimm: u8) -> Vec<(u8, u8)> {
         debug_assert_ne!(from_dimm, to_dimm);
         let from_pos = self.position_of[from_dimm as usize];
@@ -103,12 +127,6 @@ impl Topology for LineTopology {
         self.dimm_at.len() as u8
     }
 
-    fn print_diagram(&self) {
-        println!("Topology (Line):");
-        let labels: Vec<String> = self.dimm_at.iter().map(|&d| dimm_label(d)).collect();
-        println!("  {}", labels.join(" <-> "));
-    }
-
     fn link_sort_key(&self, from_dimm: u8, to_dimm: u8) -> (usize, bool) {
         let from_pos = self.position_of[from_dimm as usize];
         let to_pos = self.position_of[to_dimm as usize];
@@ -128,7 +146,8 @@ pub(super) struct RingTopology {
     pub(super) position_of: [usize; 4],
 }
 
-impl RingTopology {    const N: usize = 4;
+impl RingTopology {
+    const N: usize = 4;
 
     pub(super) fn new() -> Self {
         // Same DIMM ordering as LineTopology, but with a wrap-around link.
@@ -152,7 +171,6 @@ impl Debug for RingTopology {
 }
 
 impl Topology for RingTopology {
-
     fn get_route(&self, from_dimm: u8, to_dimm: u8) -> Vec<(u8, u8)> {
         debug_assert_ne!(from_dimm, to_dimm);
         let from_pos = self.position_of[from_dimm as usize];
@@ -198,17 +216,6 @@ impl Topology for RingTopology {
         Self::N as u8
     }
 
-    fn print_diagram(&self) {
-        println!("Topology (Ring):");
-        let labels: Vec<String> = self.dimm_at.iter().map(|&d| dimm_label(d)).collect();
-        // Show ring with wrap-around
-        println!(
-            "  {} <-> {}",
-            labels.join(" <-> "),
-            dimm_label(self.dimm_at[0])
-        );
-    }
-
     fn link_sort_key(&self, from_dimm: u8, to_dimm: u8) -> (usize, bool) {
         let from_pos = self.position_of[from_dimm as usize];
         let to_pos = self.position_of[to_dimm as usize];
@@ -226,6 +233,54 @@ impl Topology for RingTopology {
             from_pos > to_pos
         };
         (min_pos, is_reverse)
+    }
+}
+
+// ─── Fully Connected Topology ───────────────────────────────────────────────
+
+#[derive(Clone)]
+pub(super) struct FullyConnectedTopology {
+    num_dimms: usize,
+}
+
+impl FullyConnectedTopology {
+    pub(super) fn new(num_dimms: usize) -> Self {
+        FullyConnectedTopology { num_dimms }
+    }
+}
+
+impl Debug for FullyConnectedTopology {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FullyConnectedTopology")
+    }
+}
+
+impl Topology for FullyConnectedTopology {
+    fn get_route(&self, from_dimm: u8, to_dimm: u8) -> Vec<(u8, u8)> {
+        debug_assert_ne!(from_dimm, to_dimm);
+        vec![(from_dimm, to_dimm)]
+    }
+
+    fn get_links(&self) -> Vec<(u8, u8)> {
+        let mut links = Vec::new();
+        for i in 0..self.num_dimms as u8 {
+            for j in (i + 1)..self.num_dimms as u8 {
+                links.push((i, j));
+            }
+        }
+        links
+    }
+
+    fn get_num_dimms(&self) -> u8 {
+        self.num_dimms as u8
+    }
+
+    fn link_sort_key(&self, from_dimm: u8, to_dimm: u8) -> (usize, bool) {
+        let min_dimm = from_dimm.min(to_dimm);
+        let max_dimm = from_dimm.max(to_dimm);
+        let group_id = (min_dimm as usize) * self.num_dimms + (max_dimm as usize);
+        let is_reverse = from_dimm > to_dimm;
+        (group_id, is_reverse)
     }
 }
 
@@ -366,6 +421,32 @@ mod tests {
                     fwd.len(),
                     rev.len()
                 );
+            }
+        }
+    }
+
+    // ─── Fully Connected Topology Tests ─────────────────────────────────
+
+    #[test]
+    fn test_fc_topology_links() {
+        let topology = FullyConnectedTopology::new(4);
+        let mut links = topology.get_links();
+        links.sort();
+        // FullyConnected with 4 DIMMs should have 4 * 3 / 2 = 6 links:
+        assert_eq!(links, vec![(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]);
+    }
+
+    #[test]
+    fn test_fc_topology_route() {
+        let topology = FullyConnectedTopology::new(4);
+        // All routes should be exactly 1 hop
+        for from in 0u8..4 {
+            for to in 0u8..4 {
+                if from == to {
+                    continue;
+                }
+                let route = topology.get_route(from, to);
+                assert_eq!(route, vec![(from, to)]);
             }
         }
     }

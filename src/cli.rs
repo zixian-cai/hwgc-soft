@@ -101,6 +101,7 @@ pub enum SimulationArchitectureChoice {
 pub enum TopologyChoice {
     Line,
     Ring,
+    FullyConnected,
 }
 
 #[derive(Subcommand, Debug)]
