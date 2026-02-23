@@ -226,7 +226,7 @@ impl Display for RankId {
 
 impl RankId {
     #[allow(dead_code)]
-    pub(crate) fn to_dict(&self) -> HashMap<String, Value> {
+    pub(crate) fn as_dict(&self) -> HashMap<String, Value> {
         let mut dict = HashMap::new();
         dict.insert("channel".to_string(), json!(self.channel()));
         dict.insert("dimm".to_string(), json!(self.dimm()));
