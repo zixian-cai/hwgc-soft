@@ -214,10 +214,19 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         // Human-readable summary
         println!("######################### Human-Readable Summary ##########################");
         println!("Timing & Utilization:");
-        println!("  Ticks:              {}", self.ticks);
+        println!(
+            "  Ticks:              {}",
+            Self::format_thousands(self.ticks)
+        );
         println!("  Time:               {:.3} ms", time_ms);
-        println!("  Total marked objs:  {}", total_marked_objects);
-        println!("  Total busy ticks:   {}", total_busy_ticks);
+        println!(
+            "  Total marked objs:  {}",
+            Self::format_thousands(total_marked_objects)
+        );
+        println!(
+            "  Total busy ticks:   {}",
+            Self::format_thousands(total_busy_ticks)
+        );
         println!("  Utilization:        {:.3}", utilization);
         println!();
         println!("Cache (aggregate):");
