@@ -1,4 +1,5 @@
 use super::topology::Topology;
+use super::super::memory::DimmId;
 use super::work::NMPMessage;
 use std::collections::HashMap;
 
@@ -7,7 +8,7 @@ use std::collections::HashMap;
 struct InFlightMessage {
     message: NMPMessage,
     /// Full route of directed links to traverse.
-    route: Vec<(u8, u8)>,
+    route: Vec<(DimmId, DimmId)>,
     /// Index of the current hop in `route`.
     current_hop: usize,
     /// Cycles remaining on the current hop.
@@ -23,7 +24,6 @@ struct DirectedLinkStats {
 
 /// The network fabric that models hop-by-hop message forwarding with
 /// per-link bandwidth tracking.
-
 pub(super) const PER_HOP_LATENCY: usize = 4;
 pub(super) const DIMM_TO_RANK_LATENCY: usize = 2;
 
@@ -31,20 +31,20 @@ pub(super) const DIMM_TO_RANK_LATENCY: usize = 2;
 pub(super) struct Network {
     in_flight: Vec<InFlightMessage>,
     /// Keyed by directed link `(from_dimm, to_dimm)`.
-    link_stats: HashMap<(u8, u8), DirectedLinkStats>,
+    link_stats: HashMap<(DimmId, DimmId), DirectedLinkStats>,
 
     /// Per-tick message count per directed link, used to find peak demand.
     /// Keyed by `(from_dimm, to_dimm)`, value is the count for the current tick.
-    current_tick_counts: HashMap<(u8, u8), usize>,
+    current_tick_counts: HashMap<(DimmId, DimmId), usize>,
     /// The maximum single-tick message count observed on any directed link.
-    peak_tick_counts: HashMap<(u8, u8), usize>,
+    peak_tick_counts: HashMap<(DimmId, DimmId), usize>,
 }
 
 /// Summary of bandwidth statistics for a single directed link.
 #[derive(Debug, Clone)]
 pub(super) struct LinkBandwidthStats {
-    pub(super) from_dimm: u8,
-    pub(super) to_dimm: u8,
+    pub(super) from_dimm: DimmId,
+    pub(super) to_dimm: DimmId,
     pub(super) messages_forwarded: usize,
     /// Peak messages in a single tick on this directed link.
     pub(super) peak_messages_per_tick: usize,
@@ -76,7 +76,7 @@ impl Network {
     }
 
     /// Inject a new message into the network. The route must be non-empty.
-    pub(super) fn inject(&mut self, msg: NMPMessage, route: Vec<(u8, u8)>) {
+    pub(super) fn inject(&mut self, msg: NMPMessage, route: Vec<(DimmId, DimmId)>) {
         debug_assert!(!route.is_empty());
         // Record the first link traversal immediately.
         self.record_link_traversal(route[0]);
@@ -88,7 +88,7 @@ impl Network {
         });
     }
 
-    fn record_link_traversal(&mut self, link: (u8, u8)) {
+    fn record_link_traversal(&mut self, link: (DimmId, DimmId)) {
         self.link_stats
             .get_mut(&link)
             .expect("link not registered in topology")
@@ -180,7 +180,7 @@ mod tests {
         let mut net = Network::new(&topo);
 
         // DIMM 0 -> DIMM 2: single hop
-        let route = topo.get_route(0, 2);
+        let route = topo.get_route(DimmId(0), DimmId(2));
         assert_eq!(route.len(), 1);
 
         net.inject(make_msg(2), route);
@@ -209,7 +209,7 @@ mod tests {
         let mut net = Network::new(&topo);
 
         // DIMM 0 -> DIMM 3: 3 hops (0->2->1->3)
-        let route = topo.get_route(0, 3);
+        let route = topo.get_route(DimmId(0), DimmId(3));
         assert_eq!(route.len(), 3);
 
         net.inject(make_msg(3), route);
@@ -231,7 +231,7 @@ mod tests {
         let mut net = Network::new(&topo);
 
         // Send from DIMM 0 -> DIMM 3 (3 hops: 0->2, 2->1, 1->3)
-        let route = topo.get_route(0, 3);
+        let route = topo.get_route(DimmId(0), DimmId(3));
         net.inject(make_msg(3), route);
 
         let hop = PER_HOP_LATENCY;
@@ -243,23 +243,23 @@ mod tests {
         // Each of the 3 directed links should have 1 message forwarded
         let fwd_02 = stats
             .iter()
-            .find(|s| s.from_dimm == 0 && s.to_dimm == 2)
+            .find(|s| s.from_dimm == DimmId(0) && s.to_dimm == DimmId(2))
             .unwrap();
         assert_eq!(fwd_02.messages_forwarded, 1);
         let fwd_21 = stats
             .iter()
-            .find(|s| s.from_dimm == 2 && s.to_dimm == 1)
+            .find(|s| s.from_dimm == DimmId(2) && s.to_dimm == DimmId(1))
             .unwrap();
         assert_eq!(fwd_21.messages_forwarded, 1);
         let fwd_13 = stats
             .iter()
-            .find(|s| s.from_dimm == 1 && s.to_dimm == 3)
+            .find(|s| s.from_dimm == DimmId(1) && s.to_dimm == DimmId(3))
             .unwrap();
         assert_eq!(fwd_13.messages_forwarded, 1);
         // Reverse directions should have 0
         let fwd_20 = stats
             .iter()
-            .find(|s| s.from_dimm == 2 && s.to_dimm == 0)
+            .find(|s| s.from_dimm == DimmId(2) && s.to_dimm == DimmId(0))
             .unwrap();
         assert_eq!(fwd_20.messages_forwarded, 0);
     }
@@ -271,7 +271,7 @@ mod tests {
 
         // Inject 3 messages on the same single-hop link in the same tick.
         for _ in 0..3 {
-            let route = topo.get_route(0, 2);
+            let route = topo.get_route(DimmId(0), DimmId(2));
             net.inject(make_msg(2), route);
         }
 
@@ -283,7 +283,7 @@ mod tests {
         let stats = net.bandwidth_stats();
         let link = stats
             .iter()
-            .find(|s| s.from_dimm == 0 && s.to_dimm == 2)
+            .find(|s| s.from_dimm == DimmId(0) && s.to_dimm == DimmId(2))
             .unwrap();
         assert_eq!(link.messages_forwarded, 3);
         // All 3 were injected in the same tick, so peak per tick is 3.
@@ -308,8 +308,8 @@ mod tests {
         // Two messages crossing on link (2,1)/(1,2):
         // Message A: DIMM 0 -> DIMM 3 (route: 0->2, 2->1, 1->3)
         // Message B: DIMM 3 -> DIMM 0 (route: 3->1, 1->2, 2->0)
-        let route_a = topo.get_route(0, 3);
-        let route_b = topo.get_route(3, 0);
+        let route_a = topo.get_route(DimmId(0), DimmId(3));
+        let route_b = topo.get_route(DimmId(3), DimmId(0));
         net.inject(make_msg(3), route_a);
         net.inject(make_msg(0), route_b);
 
@@ -326,13 +326,13 @@ mod tests {
         // Link (2,1): message A traverses it on hop 2
         let link_21 = stats
             .iter()
-            .find(|s| s.from_dimm == 2 && s.to_dimm == 1)
+            .find(|s| s.from_dimm == DimmId(2) && s.to_dimm == DimmId(1))
             .unwrap();
         assert_eq!(link_21.messages_forwarded, 1);
         // Link (1,2): message B traverses it on hop 2
         let link_12 = stats
             .iter()
-            .find(|s| s.from_dimm == 1 && s.to_dimm == 2)
+            .find(|s| s.from_dimm == DimmId(1) && s.to_dimm == DimmId(2))
             .unwrap();
         assert_eq!(link_12.messages_forwarded, 1);
     }

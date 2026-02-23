@@ -178,7 +178,7 @@ impl AddressMapping {
     /// Returns the owner thread ID based on the channel and rank.
     /// This needs to be consistent with the TopologyLocation encoding.
     pub(super) fn get_owner_id(&self) -> usize {
-        let mut rank_id = RankID(0);
+        let mut rank_id = RankId(0);
         rank_id.set_channel(self.channel());
         rank_id.set_dimm(self.dimm());
         rank_id.set_rank(self.rank());
@@ -187,26 +187,44 @@ impl AddressMapping {
 }
 
 bitfield! {
-    pub struct RankID(u8);
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct DimmId(u8);
+    impl Debug;
+    pub u8, channel, set_channel: 0, 0;
+    pub u8, dimm, set_dimm: 1, 1;
+}
+
+impl Display for DimmId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "C{}-D{}", self.channel(), self.dimm())
+    }
+}
+
+impl From<RankId> for DimmId {
+    fn from(rank_id: RankId) -> Self {
+        let mut dimm_id = DimmId(0);
+        dimm_id.set_channel(rank_id.channel());
+        dimm_id.set_dimm(rank_id.dimm());
+        dimm_id
+    }
+}
+
+bitfield! {
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct RankId(u8);
     impl Debug;
     pub u8, channel, set_channel: 0, 0;
     pub u8, dimm, set_dimm: 1, 1;
     pub u8, rank, set_rank: 2, 2;
 }
 
-impl Display for RankID {
+impl Display for RankId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "C{}-D{}-R{}", self.channel(), self.dimm(), self.rank())
     }
 }
 
-impl PartialEq for RankID {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl RankID {
+impl RankId {
     #[allow(dead_code)]
     pub(crate) fn to_dict(&self) -> HashMap<String, Value> {
         let mut dict = HashMap::new();

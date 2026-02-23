@@ -1,5 +1,5 @@
 use super::SimulationArchitecture;
-use crate::simulate::memory::RankID;
+use crate::simulate::memory::{DimmId, RankId};
 use crate::simulate::memory::{AddressMapping, DDR4RankOption};
 use crate::util::ticks_to_us;
 use crate::{ObjectModel, SimulationArgs};
@@ -103,18 +103,16 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
 
         // Inject outgoing messages into the network fabric.
         for (sender_id, msg) in messages {
-            let sender_rank = RankID(sender_id as u8);
-            let recipient_rank = RankID(msg.recipient as u8);
-            let mut sender_dimm = RankID(sender_rank.0);
-            sender_dimm.set_rank(0);
-            let mut recipient_dimm = RankID(recipient_rank.0);
-            recipient_dimm.set_rank(0);
+            let sender_rank = RankId(sender_id as u8);
+            let recipient_rank = RankId(msg.recipient as u8);
+            let sender_dimm = DimmId::from(sender_rank);
+            let recipient_dimm = DimmId::from(recipient_rank);
 
             if sender_dimm == recipient_dimm {
                 // Same DIMM: deliver directly (no network traversal needed).
                 self.processors[msg.recipient].inbox.push(msg);
             } else {
-                let route = self.topology.get_route(sender_dimm.0, recipient_dimm.0);
+                let route = self.topology.get_route(sender_dimm, recipient_dimm);
                 self.network.inject(msg, route);
             }
         }
@@ -198,7 +196,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 stats.insert(format!("{}.avg_throughput_gbps", key_prefix), avg_gbps);
             }
             info!(
-                "[Network] link DIMM{} -> DIMM{}: {} messages forwarded, peak {}/tick ({:.3} GB/s)",
+                "[Network] link {} -> {}: {} messages forwarded, peak {}/tick ({:.3} GB/s)",
                 link.from_dimm,
                 link.to_dimm,
                 Self::format_thousands(link.messages_forwarded),
@@ -284,7 +282,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 0.0
             };
             println!(
-                "  DIMM{} -> DIMM{}    {:>10} {:>10} {:>12.3} {:>12.3}",
+                "  {} -> {}    {:>10} {:>10} {:>12.3} {:>12.3}",
                 link.from_dimm,
                 link.to_dimm,
                 Self::format_thousands(link.messages_forwarded),
@@ -363,7 +361,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
     }
 
     fn to_thread_name_event(&self) -> TracingEvent {
-        TracingEvent::new_threadname_event(0, self.id as u32, RankID(self.id as u8).to_string())
+        TracingEvent::new_threadname_event(0, self.id as u32, RankId(self.id as u8).to_string())
     }
 
     fn events(&self) -> Vec<TracingEvent> {
