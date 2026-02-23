@@ -34,6 +34,8 @@ In jj, your working directory is always a commit (referenced as `@`). Changes ar
 
 There is no need to run `jj commit`.
 
+However, it means that if you generate any temporary file (e.g., for viewing diff), please clean up those files before switching to another/a new commit.
+
 ### Commits Are Mutable
 
 **CRITICAL**: Unlike git, jj commits can be freely modified. This enables a high-quality commit workflow:

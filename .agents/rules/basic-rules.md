@@ -44,7 +44,7 @@ trigger: always_on
 - You may suggest improvements and ask, but never act on them without approval
 - Fix formatting and run linters  only after all changes are done and approved.
 - Use version control systems to look up previous commits or produce a diff against the main branch. Never commit any changes unless explicitly told to.
-- Always try to directly edit code first before resorting
+- Always try to directly edit code first before resorting to scripting-based regex replacement
 
 ### Convention Mimicry
 - The codebase is the source of truth for style
