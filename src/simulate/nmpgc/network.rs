@@ -23,12 +23,16 @@ struct DirectedLinkStats {
 
 /// The network fabric that models hop-by-hop message forwarding with
 /// per-link bandwidth tracking.
+
+pub(super) const PER_HOP_LATENCY: usize = 4;
+pub(super) const DIMM_TO_RANK_LATENCY: usize = 2;
+
 #[derive(Debug)]
 pub(super) struct Network {
     in_flight: Vec<InFlightMessage>,
     /// Keyed by directed link `(from_dimm, to_dimm)`.
     link_stats: HashMap<(u8, u8), DirectedLinkStats>,
-    per_hop_latency: usize,
+
     /// Per-tick message count per directed link, used to find peak demand.
     /// Keyed by `(from_dimm, to_dimm)`, value is the count for the current tick.
     current_tick_counts: HashMap<(u8, u8), usize>,
@@ -47,7 +51,7 @@ pub(super) struct LinkBandwidthStats {
 }
 
 impl Network {
-    pub(super) fn new<T: Topology>(topology: &T) -> Self {
+    pub(super) fn new(topology: &dyn Topology) -> Self {
         let mut link_stats = HashMap::new();
         let mut current_tick_counts = HashMap::new();
         let mut peak_tick_counts = HashMap::new();
@@ -65,7 +69,7 @@ impl Network {
         Network {
             in_flight: Vec::new(),
             link_stats,
-            per_hop_latency: topology.get_per_hop_latency(),
+
             current_tick_counts,
             peak_tick_counts,
         }
@@ -80,7 +84,7 @@ impl Network {
             message: msg,
             route,
             current_hop: 0,
-            remaining_hop_latency: self.per_hop_latency,
+            remaining_hop_latency: PER_HOP_LATENCY,
         });
     }
 
@@ -127,7 +131,7 @@ impl Network {
                     // Move to the next hop.
                     let next_link = self.in_flight[i].route[self.in_flight[i].current_hop];
                     self.record_link_traversal(next_link);
-                    self.in_flight[i].remaining_hop_latency = self.per_hop_latency;
+                    self.in_flight[i].remaining_hop_latency = PER_HOP_LATENCY;
                     i += 1;
                 }
             } else {
@@ -183,7 +187,7 @@ mod tests {
         assert!(!net.is_empty());
 
         // Tick for per_hop_latency cycles
-        let hop = topo.get_per_hop_latency();
+        let hop = PER_HOP_LATENCY;
         for tick in 0..hop {
             let delivered = net.tick();
             if tick < hop - 1 {
@@ -210,7 +214,7 @@ mod tests {
 
         net.inject(make_msg(3), route);
 
-        let hop = topo.get_per_hop_latency();
+        let hop = PER_HOP_LATENCY;
         let total_ticks = 3 * hop;
         let mut delivered_count = 0;
         for _ in 0..total_ticks {
@@ -230,7 +234,7 @@ mod tests {
         let route = topo.get_route(0, 3);
         net.inject(make_msg(3), route);
 
-        let hop = topo.get_per_hop_latency();
+        let hop = PER_HOP_LATENCY;
         for _ in 0..(3 * hop) {
             net.tick();
         }
@@ -271,7 +275,7 @@ mod tests {
             net.inject(make_msg(2), route);
         }
 
-        let hop = topo.get_per_hop_latency();
+        let hop = PER_HOP_LATENCY;
         for _ in 0..hop {
             net.tick();
         }
@@ -309,7 +313,7 @@ mod tests {
         net.inject(make_msg(3), route_a);
         net.inject(make_msg(0), route_b);
 
-        let hop = topo.get_per_hop_latency();
+        let hop = PER_HOP_LATENCY;
         // Both messages are 3 hops, need 3 * hop ticks
         let mut delivered = Vec::new();
         for _ in 0..(3 * hop) {

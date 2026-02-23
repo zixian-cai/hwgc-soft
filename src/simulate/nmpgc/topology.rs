@@ -2,20 +2,9 @@ use super::super::memory::RankID;
 use std::fmt::Debug;
 
 pub(super) trait Topology: Debug {
-    /// Total end-to-end latency between two ranks (includes DIMM-to-rank on both ends).
-    #[allow(dead_code)]
-    fn get_latency(&self, from: u8, to: u8) -> usize;
-
     /// Returns the ordered sequence of directed DIMM-to-DIMM links a message must traverse.
     /// Each element is `(from_dimm, to_dimm)`.
     fn get_route(&self, from_dimm: u8, to_dimm: u8) -> Vec<(u8, u8)>;
-
-    /// Latency in cycles for a message to traverse one link (one hop).
-    fn get_per_hop_latency(&self) -> usize;
-
-    /// Latency from the DIMM link controller to a rank on that DIMM.
-    fn get_dimm_to_rank_latency(&self) -> usize;
-
     /// All unique undirected links in the topology, each represented as `(a, b)` with `a < b`.
     fn get_links(&self) -> Vec<(u8, u8)>;
 
@@ -51,9 +40,6 @@ fn dimm_label(dimm_id: u8) -> String {
 
 #[derive(Clone)]
 pub(super) struct LineTopology {
-    /// Latency between DIMMs (kept for backwards-compatible `get_latency`)
-    #[allow(dead_code)]
-    dimm_latency_matrix: [[usize; 4]; 4],
     /// DIMM ordering along the line: position_of[dimm_id] gives its index.
     pub(super) position_of: [usize; 4],
     /// Inverse of `position_of`: dimm_at[position] gives the DIMM id.
@@ -61,21 +47,16 @@ pub(super) struct LineTopology {
 }
 
 impl LineTopology {
-    const DIMM_TO_RANK_LATENCY: usize = 2;
-    const PER_HOP_LATENCY: usize = 4;
-
     pub(super) fn new() -> Self {
         // 0: channel 0, dimm 0,  1: channel 1, dimm 0,
         // 2: channel 0, dimm 1,  3: channel 1, dimm 1
         // Line order: 0 <-> 2 <-> 1 <-> 3
-        let dimm_latency_matrix = [[0, 8, 4, 12], [8, 0, 4, 4], [4, 4, 0, 8], [12, 4, 8, 0]];
         let dimm_at = [0, 2, 1, 3];
         let mut position_of = [0usize; 4];
         for (pos, &dimm) in dimm_at.iter().enumerate() {
             position_of[dimm as usize] = pos;
         }
         LineTopology {
-            dimm_latency_matrix,
             position_of,
             dimm_at,
         }
@@ -89,23 +70,6 @@ impl Debug for LineTopology {
 }
 
 impl Topology for LineTopology {
-    fn get_latency(&self, from: u8, to: u8) -> usize {
-        debug_assert_ne!(from, to);
-        let from_id = RankID(from);
-        let to_id = RankID(to);
-        let mut from_dimm = RankID(from_id.0);
-        from_dimm.set_rank(0);
-        let mut to_dimm = RankID(to_id.0);
-        to_dimm.set_rank(0);
-
-        if from_dimm == to_dimm {
-            return Self::DIMM_TO_RANK_LATENCY;
-        }
-
-        let between_dimm_latency =
-            self.dimm_latency_matrix[from_dimm.0 as usize][to_dimm.0 as usize];
-        between_dimm_latency + Self::DIMM_TO_RANK_LATENCY * 2
-    }
 
     fn get_route(&self, from_dimm: u8, to_dimm: u8) -> Vec<(u8, u8)> {
         debug_assert_ne!(from_dimm, to_dimm);
@@ -123,14 +87,6 @@ impl Topology for LineTopology {
             }
         }
         route
-    }
-
-    fn get_per_hop_latency(&self) -> usize {
-        Self::PER_HOP_LATENCY
-    }
-
-    fn get_dimm_to_rank_latency(&self) -> usize {
-        Self::DIMM_TO_RANK_LATENCY
     }
 
     fn get_links(&self) -> Vec<(u8, u8)> {
@@ -172,10 +128,7 @@ pub(super) struct RingTopology {
     pub(super) position_of: [usize; 4],
 }
 
-impl RingTopology {
-    const DIMM_TO_RANK_LATENCY: usize = 2;
-    const PER_HOP_LATENCY: usize = 4;
-    const N: usize = 4;
+impl RingTopology {    const N: usize = 4;
 
     pub(super) fn new() -> Self {
         // Same DIMM ordering as LineTopology, but with a wrap-around link.
@@ -199,20 +152,6 @@ impl Debug for RingTopology {
 }
 
 impl Topology for RingTopology {
-    fn get_latency(&self, from: u8, to: u8) -> usize {
-        debug_assert_ne!(from, to);
-        let mut from_dimm = RankID(from);
-        from_dimm.set_rank(0);
-        let mut to_dimm = RankID(to);
-        to_dimm.set_rank(0);
-
-        if from_dimm == to_dimm {
-            return Self::DIMM_TO_RANK_LATENCY;
-        }
-
-        let hops = self.get_route(from_dimm.0, to_dimm.0).len();
-        hops * Self::PER_HOP_LATENCY + 2 * Self::DIMM_TO_RANK_LATENCY
-    }
 
     fn get_route(&self, from_dimm: u8, to_dimm: u8) -> Vec<(u8, u8)> {
         debug_assert_ne!(from_dimm, to_dimm);
@@ -242,14 +181,6 @@ impl Topology for RingTopology {
             }
         }
         route
-    }
-
-    fn get_per_hop_latency(&self) -> usize {
-        Self::PER_HOP_LATENCY
-    }
-
-    fn get_dimm_to_rank_latency(&self) -> usize {
-        Self::DIMM_TO_RANK_LATENCY
     }
 
     fn get_links(&self) -> Vec<(u8, u8)> {
@@ -305,58 +236,6 @@ mod tests {
     // ─── Line Topology Tests ────────────────────────────────────────────
 
     #[test]
-    fn test_line_topology_latency_same_dimm() {
-        let topology = LineTopology::new();
-        let from = RankID(1);
-        let mut to = RankID(1);
-        to.set_rank(1);
-        assert_ne!(from, to);
-        assert_eq!(
-            topology.get_latency(from.0, to.0),
-            LineTopology::DIMM_TO_RANK_LATENCY
-        );
-    }
-
-    #[test]
-    fn test_line_topology_latency_different_dimms() {
-        let topology = LineTopology::new();
-        // 0 -> 2 -> 1
-        let latency = topology.get_latency(0, 1);
-        assert_eq!(latency, 8 + LineTopology::DIMM_TO_RANK_LATENCY * 2);
-    }
-
-    #[test]
-    fn test_line_topology_latency_reverse_path() {
-        let topology = LineTopology::new();
-        // 1 -> 2 -> 0
-        let latency = topology.get_latency(1, 0);
-        assert_eq!(latency, 8 + LineTopology::DIMM_TO_RANK_LATENCY * 2);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_line_topology_latency_same_rank() {
-        let topology = LineTopology::new();
-        topology.get_latency(0, 0); // Should panic due to debug_assert_ne!
-    }
-
-    #[test]
-    fn test_line_topology_single_hop() {
-        let topology = LineTopology::new();
-        // 0 -> 2
-        let latency = topology.get_latency(0, 2);
-        assert_eq!(latency, 4 + LineTopology::DIMM_TO_RANK_LATENCY * 2);
-    }
-
-    #[test]
-    fn test_line_topology_three_hops() {
-        let topology = LineTopology::new();
-        // 0 -> 2 -> 1 -> 3
-        let latency = topology.get_latency(0, 3);
-        assert_eq!(latency, 12 + LineTopology::DIMM_TO_RANK_LATENCY * 2);
-    }
-
-    #[test]
     fn test_line_topology_route_adjacent() {
         let topology = LineTopology::new();
         // DIMM 0 -> DIMM 2 (adjacent in line order)
@@ -395,32 +274,6 @@ mod tests {
         links.sort();
         // Line: 0-2-1-3 → links (0,2), (1,2), (1,3)
         assert_eq!(links, vec![(0, 2), (1, 2), (1, 3)]);
-    }
-
-    #[test]
-    fn test_line_topology_route_consistency() {
-        let topology = LineTopology::new();
-        // Verify that route hop count × per-hop latency equals the DIMM-to-DIMM
-        // portion of get_latency (i.e. get_latency minus the two DIMM-to-rank ends).
-        for from in 0u8..4 {
-            for to in 0u8..4 {
-                if from == to {
-                    continue;
-                }
-                let route = topology.get_route(from, to);
-                let route_latency = route.len() * topology.get_per_hop_latency();
-                let total_latency = route_latency + 2 * topology.get_dimm_to_rank_latency();
-
-                let matrix_latency = topology.dimm_latency_matrix[from as usize][to as usize]
-                    + 2 * LineTopology::DIMM_TO_RANK_LATENCY;
-
-                assert_eq!(
-                    total_latency, matrix_latency,
-                    "Mismatch for route {} -> {}: route gives {}, matrix gives {}",
-                    from, to, total_latency, matrix_latency
-                );
-            }
-        }
     }
 
     // ─── Ring Topology Tests ────────────────────────────────────────────
@@ -473,28 +326,6 @@ mod tests {
     }
 
     #[test]
-    fn test_ring_topology_latency_adjacent() {
-        let topology = RingTopology::new();
-        // DIMM 0 -> DIMM 2: 1 hop
-        let latency = topology.get_latency(0, 2);
-        assert_eq!(
-            latency,
-            RingTopology::PER_HOP_LATENCY + 2 * RingTopology::DIMM_TO_RANK_LATENCY
-        );
-    }
-
-    #[test]
-    fn test_ring_topology_latency_wrap_around() {
-        let topology = RingTopology::new();
-        // DIMM 0 -> DIMM 3: 1 hop (via wrap-around)
-        let latency = topology.get_latency(0, 3);
-        assert_eq!(
-            latency,
-            RingTopology::PER_HOP_LATENCY + 2 * RingTopology::DIMM_TO_RANK_LATENCY
-        );
-    }
-
-    #[test]
     fn test_ring_topology_max_hops_is_two() {
         let topology = RingTopology::new();
         // With 4 DIMMs in a ring, the maximum shortest path is 2 hops.
@@ -537,17 +368,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn test_ring_topology_same_dimm_latency() {
-        let topology = RingTopology::new();
-        let from = RankID(1);
-        let mut to = RankID(1);
-        to.set_rank(1);
-        assert_eq!(
-            topology.get_latency(from.0, to.0),
-            RingTopology::DIMM_TO_RANK_LATENCY
-        );
     }
 }

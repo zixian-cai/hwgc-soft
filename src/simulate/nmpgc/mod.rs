@@ -20,12 +20,29 @@ pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
     processors: Vec<NMPProcessor<LOG_NUM_THREADS>>,
     ticks: usize,
     frequency_ghz: f64,
-    topology: topology::LineTopology,
+    topology: Box<dyn Topology>,
     network: Network,
 }
 
 impl<const LOG_NUM_THREADS: u8> NMPGC<LOG_NUM_THREADS> {
     const NUM_THREADS: u64 = 1u64 << LOG_NUM_THREADS;
+    fn format_thousands(mut n: usize) -> String {
+        if n == 0 {
+            return "0".to_string();
+        }
+        let mut s = String::new();
+        while n > 0 {
+            let rem = n % 1000;
+            n /= 1000;
+            if n > 0 {
+                s.insert_str(0, &format!(",{:03}", rem));
+            } else {
+                s.insert_str(0, &format!("{}", rem));
+            }
+        }
+        s
+    }
+
     fn get_owner_processor(o: u64) -> usize {
         let mapping = AddressMapping(o);
         mapping.get_owner_id()
@@ -43,9 +60,12 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             DDR4RankOption::Naive
         };
 
-        let topology = topology::LineTopology::new();
-        let network = Network::new(&topology);
-        let dimm_to_rank_latency = topology.get_dimm_to_rank_latency();
+        let topology: Box<dyn Topology> = match args.topology {
+            crate::cli::TopologyChoice::Line => Box::new(topology::LineTopology::new()),
+            crate::cli::TopologyChoice::Ring => Box::new(topology::RingTopology::new()),
+        };
+        let network = Network::new(&*topology);
+        let dimm_to_rank_latency = network::DIMM_TO_RANK_LATENCY;
 
         // Convert &[u64] into Vec<u64>
         let mut processors: Vec<NMPProcessor<LOG_NUM_THREADS>> = (0..Self::NUM_THREADS)
@@ -178,7 +198,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 "[Network] link DIMM{} -> DIMM{}: {} messages forwarded, peak {}/tick ({:.3} GB/s)",
                 link.from_dimm,
                 link.to_dimm,
-                link.messages_forwarded,
+                Self::format_thousands(link.messages_forwarded),
                 link.peak_messages_per_tick,
                 peak_gbps,
             );
@@ -203,11 +223,15 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         println!("Cache (aggregate):");
         println!(
             "  Read hits:    {:>10}    Read misses:  {:>10}    Hit rate: {:.3}",
-            total_read_hits, total_read_misses, read_hit_rate
+            Self::format_thousands(total_read_hits),
+            Self::format_thousands(total_read_misses),
+            read_hit_rate
         );
         println!(
             "  Write hits:   {:>10}    Write misses: {:>10}    Hit rate: {:.3}",
-            total_write_hits, total_write_misses, write_hit_rate
+            Self::format_thousands(total_write_hits),
+            Self::format_thousands(total_write_misses),
+            write_hit_rate
         );
         println!();
         println!("Per-Processor:");
@@ -219,34 +243,26 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             println!(
                 "  {:<4} {:>10} {:>10} {:>8.3} {:>10} {:>10} {:>10} {:>10}",
                 p.id,
-                p.marked_objects,
-                p.busy_ticks,
+                Self::format_thousands(p.marked_objects),
+                Self::format_thousands(p.busy_ticks),
                 p.busy_ticks as f64 / self.ticks as f64,
-                p.cache.stats.read_hits,
-                p.cache.stats.read_misses,
-                p.cache.stats.write_hits,
-                p.cache.stats.write_misses
+                Self::format_thousands(p.cache.stats.read_hits),
+                Self::format_thousands(p.cache.stats.read_misses),
+                Self::format_thousands(p.cache.stats.write_hits),
+                Self::format_thousands(p.cache.stats.write_misses)
             );
         }
         println!();
-        self.topology.print_topology_diagram();
+        self.topology.print_diagram();
         println!();
         println!("Network Links:");
         println!(
             "  {:<16} {:>10} {:>10} {:>12} {:>12}",
             "Link", "Msgs Fwd", "Peak/Tick", "Peak GB/s", "Avg GB/s"
         );
-        // Sort link stats by physical position in the line topology.
+        // Sort link stats by physical connection order.
         let mut link_stats = self.network.bandwidth_stats();
-        let position_of = &self.topology.position_of;
-        link_stats.sort_by_key(|s| {
-            let from_pos = position_of[s.from_dimm as usize];
-            let to_pos = position_of[s.to_dimm as usize];
-            // Forward direction (left-to-right) before reverse, grouped by physical link.
-            let min_pos = from_pos.min(to_pos);
-            let is_reverse = from_pos > to_pos;
-            (min_pos, is_reverse)
-        });
+        link_stats.sort_by_key(|s| self.topology.link_sort_key(s.from_dimm, s.to_dimm));
         for link in &link_stats {
             let peak_gbps =
                 link.peak_messages_per_tick as f64 * MESSAGE_SIZE_BYTES * self.frequency_ghz;
@@ -259,7 +275,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 "  DIMM{} -> DIMM{}    {:>10} {:>10} {:>12.3} {:>12.3}",
                 link.from_dimm,
                 link.to_dimm,
-                link.messages_forwarded,
+                Self::format_thousands(link.messages_forwarded),
                 link.peak_messages_per_tick,
                 peak_gbps,
                 avg_gbps
