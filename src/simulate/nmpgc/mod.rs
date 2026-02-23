@@ -1,6 +1,6 @@
 use super::SimulationArchitecture;
-use crate::simulate::memory::{DimmId, RankId};
 use crate::simulate::memory::{AddressMapping, DDR4RankOption};
+use crate::simulate::memory::{DimmId, RankId};
 use crate::util::ticks_to_us;
 use crate::{ObjectModel, SimulationArgs};
 use std::collections::{HashMap, VecDeque};
@@ -174,6 +174,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
 
         // Network bandwidth stats (8 B per message, i.e. a 64-bit address)
         const MESSAGE_SIZE_BYTES: f64 = 8.0;
+        const FLIT_SIZE_BYTES: f64 = MESSAGE_SIZE_BYTES / network::PER_HOP_LATENCY as f64;
         let total_time_s = self.ticks as f64 / (self.frequency_ghz * 1e9);
         for link in self.network.bandwidth_stats() {
             let key_prefix = format!("link_{}_to_{}", link.from_dimm, link.to_dimm);
@@ -182,12 +183,11 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 link.messages_forwarded as f64,
             );
             stats.insert(
-                format!("{}.peak_messages_per_tick", key_prefix),
-                link.peak_messages_per_tick as f64,
+                format!("{}.peak_flits_per_tick", key_prefix),
+                link.peak_flits_per_tick as f64,
             );
-            // Peak throughput demand in GB/s: peak_messages_per_tick * 64B * freq_ghz
-            let peak_gbps =
-                link.peak_messages_per_tick as f64 * MESSAGE_SIZE_BYTES * self.frequency_ghz;
+            // Peak throughput demand in GB/s: peak_flits_per_tick * flit_size * freq_ghz
+            let peak_gbps = link.peak_flits_per_tick as f64 * FLIT_SIZE_BYTES * self.frequency_ghz;
             stats.insert(format!("{}.peak_throughput_gbps", key_prefix), peak_gbps);
             // Average throughput in GB/s
             if total_time_s > 0.0 {
@@ -196,11 +196,11 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 stats.insert(format!("{}.avg_throughput_gbps", key_prefix), avg_gbps);
             }
             info!(
-                "[Network] link {} -> {}: {} messages forwarded, peak {}/tick ({:.3} GB/s)",
+                "[Network] link {} -> {}: {} messages forwarded, peak {} flits/tick ({:.3} GB/s)",
                 link.from_dimm,
                 link.to_dimm,
                 Self::format_thousands(link.messages_forwarded),
-                link.peak_messages_per_tick,
+                link.peak_flits_per_tick,
                 peak_gbps,
             );
         }
@@ -268,14 +268,13 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         println!("Network Links:");
         println!(
             "  {:<16} {:>10} {:>10} {:>12} {:>12}",
-            "Link", "Msgs Fwd", "Peak/Tick", "Peak GB/s", "Avg GB/s"
+            "Link", "Msgs Fwd", "Peak Flits", "Peak GB/s", "Avg GB/s"
         );
         // Sort link stats by physical connection order.
         let mut link_stats = self.network.bandwidth_stats();
         link_stats.sort_by_key(|s| self.topology.link_sort_key(s.from_dimm, s.to_dimm));
         for link in &link_stats {
-            let peak_gbps =
-                link.peak_messages_per_tick as f64 * MESSAGE_SIZE_BYTES * self.frequency_ghz;
+            let peak_gbps = link.peak_flits_per_tick as f64 * FLIT_SIZE_BYTES * self.frequency_ghz;
             let avg_gbps = if total_time_s > 0.0 {
                 link.messages_forwarded as f64 * MESSAGE_SIZE_BYTES / total_time_s / 1e9
             } else {
@@ -286,7 +285,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 link.from_dimm,
                 link.to_dimm,
                 Self::format_thousands(link.messages_forwarded),
-                link.peak_messages_per_tick,
+                link.peak_flits_per_tick,
                 peak_gbps,
                 avg_gbps
             );

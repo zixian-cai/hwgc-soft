@@ -184,7 +184,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             }
             NMPProcessorWork::ReadInbox => {
                 // FIXME: hardcoded latency for ReadInbox
-                push_stall(&mut self.works, 2);
+                push_stall(&mut self.works, self.dimm_to_rank_latency);
                 if let Some(msg) = self.inbox.pop() {
                     trace!("[P{}] reading inbox message: {:?}", self.id, msg);
                     match msg.work {

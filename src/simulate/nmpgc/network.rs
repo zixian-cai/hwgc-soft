@@ -1,5 +1,5 @@
-use super::topology::Topology;
 use super::super::memory::DimmId;
+use super::topology::Topology;
 use super::work::NMPMessage;
 use std::collections::HashMap;
 
@@ -33,11 +33,11 @@ pub(super) struct Network {
     /// Keyed by directed link `(from_dimm, to_dimm)`.
     link_stats: HashMap<(DimmId, DimmId), DirectedLinkStats>,
 
-    /// Per-tick message count per directed link, used to find peak demand.
+    /// Per-tick flit count per directed link, used to find peak demand.
     /// Keyed by `(from_dimm, to_dimm)`, value is the count for the current tick.
-    current_tick_counts: HashMap<(DimmId, DimmId), usize>,
-    /// The maximum single-tick message count observed on any directed link.
-    peak_tick_counts: HashMap<(DimmId, DimmId), usize>,
+    current_tick_flits: HashMap<(DimmId, DimmId), usize>,
+    /// The maximum single-tick flit count observed on any directed link.
+    peak_tick_flits: HashMap<(DimmId, DimmId), usize>,
 }
 
 /// Summary of bandwidth statistics for a single directed link.
@@ -46,32 +46,32 @@ pub(super) struct LinkBandwidthStats {
     pub(super) from_dimm: DimmId,
     pub(super) to_dimm: DimmId,
     pub(super) messages_forwarded: usize,
-    /// Peak messages in a single tick on this directed link.
-    pub(super) peak_messages_per_tick: usize,
+    /// Peak flits (message fragments) in a single tick on this directed link.
+    pub(super) peak_flits_per_tick: usize,
 }
 
 impl Network {
     pub(super) fn new(topology: &dyn Topology) -> Self {
         let mut link_stats = HashMap::new();
-        let mut current_tick_counts = HashMap::new();
-        let mut peak_tick_counts = HashMap::new();
+        let mut current_tick_flits = HashMap::new();
+        let mut peak_tick_flits = HashMap::new();
 
         // Register both directions for each undirected link.
         for (a, b) in topology.get_links() {
             link_stats.insert((a, b), DirectedLinkStats::default());
             link_stats.insert((b, a), DirectedLinkStats::default());
-            current_tick_counts.insert((a, b), 0);
-            current_tick_counts.insert((b, a), 0);
-            peak_tick_counts.insert((a, b), 0);
-            peak_tick_counts.insert((b, a), 0);
+            current_tick_flits.insert((a, b), 0);
+            current_tick_flits.insert((b, a), 0);
+            peak_tick_flits.insert((a, b), 0);
+            peak_tick_flits.insert((b, a), 0);
         }
 
         Network {
             in_flight: Vec::new(),
             link_stats,
 
-            current_tick_counts,
-            peak_tick_counts,
+            current_tick_flits,
+            peak_tick_flits,
         }
     }
 
@@ -93,10 +93,6 @@ impl Network {
             .get_mut(&link)
             .expect("link not registered in topology")
             .messages_forwarded += 1;
-        *self
-            .current_tick_counts
-            .get_mut(&link)
-            .expect("link not registered") += 1;
     }
 
     /// Advance all in-flight messages by one cycle.
@@ -104,15 +100,21 @@ impl Network {
     /// The caller is responsible for adding the DIMM-to-rank latency
     /// stall on the receiving end.
     pub(super) fn tick(&mut self) -> Vec<NMPMessage> {
-        // Flush per-tick counts: update peaks, then reset.
-        for (link, count) in &self.current_tick_counts {
-            let peak = self.peak_tick_counts.get_mut(link).unwrap();
+        // Calculate flits traversing each link in this tick.
+        for count in self.current_tick_flits.values_mut() {
+            *count = 0;
+        }
+        for msg in &self.in_flight {
+            let link = msg.route[msg.current_hop];
+            *self.current_tick_flits.get_mut(&link).unwrap() += 1;
+        }
+
+        // Flush per-tick counts: update peaks.
+        for (link, count) in &self.current_tick_flits {
+            let peak = self.peak_tick_flits.get_mut(link).unwrap();
             if *count > *peak {
                 *peak = *count;
             }
-        }
-        for count in self.current_tick_counts.values_mut() {
-            *count = 0;
         }
 
         let mut delivered = Vec::new();
@@ -155,7 +157,7 @@ impl Network {
                 from_dimm: from,
                 to_dimm: to,
                 messages_forwarded: link.messages_forwarded,
-                peak_messages_per_tick: *self.peak_tick_counts.get(&(from, to)).unwrap_or(&0),
+                peak_flits_per_tick: *self.peak_tick_flits.get(&(from, to)).unwrap_or(&0),
             })
             .collect();
         stats.sort_by_key(|s| (s.from_dimm, s.to_dimm));
@@ -286,8 +288,9 @@ mod tests {
             .find(|s| s.from_dimm == DimmId(0) && s.to_dimm == DimmId(2))
             .unwrap();
         assert_eq!(link.messages_forwarded, 3);
-        // All 3 were injected in the same tick, so peak per tick is 3.
-        assert_eq!(link.peak_messages_per_tick, 3);
+        // All 3 were injected in the same tick and will traverse together for 4 ticks.
+        // So the peak flits per tick should be 3.
+        assert_eq!(link.peak_flits_per_tick, 3);
     }
 
     #[test]
@@ -335,5 +338,72 @@ mod tests {
             .find(|s| s.from_dimm == DimmId(1) && s.to_dimm == DimmId(2))
             .unwrap();
         assert_eq!(link_12.messages_forwarded, 1);
+    }
+
+    #[test]
+    fn test_network_pipelined_flits() {
+        let topo = LineTopology::new();
+        let mut net = Network::new(&topo);
+
+        // Inject first message at tick 0
+        let route1 = topo.get_route(DimmId(0), DimmId(2));
+        net.inject(make_msg(2), route1);
+
+        // Tick once
+        net.tick();
+
+        // Inject second message at tick 1
+        let route2 = topo.get_route(DimmId(0), DimmId(2));
+        net.inject(make_msg(2), route2);
+
+        // Tick for the remaining time
+        while !net.is_empty() {
+            net.tick();
+        }
+
+        let stats = net.bandwidth_stats();
+        let link = stats
+            .iter()
+            .find(|s| s.from_dimm == DimmId(0) && s.to_dimm == DimmId(2))
+            .unwrap();
+        assert_eq!(link.messages_forwarded, 2);
+        // The peak flits per tick should be 2, because msg1 and msg2 overlap
+        // for `PER_HOP_LATENCY - 1` ticks
+        assert_eq!(link.peak_flits_per_tick, 2);
+    }
+
+    #[test]
+    fn test_network_separated_flits() {
+        let topo = LineTopology::new();
+        let mut net = Network::new(&topo);
+
+        // Inject first message at tick 0
+        let route1 = topo.get_route(DimmId(0), DimmId(2));
+        net.inject(make_msg(2), route1);
+
+        // Tick enough times for the first message to completely clear the link
+        let hop = PER_HOP_LATENCY;
+        for _ in 0..hop {
+            net.tick();
+        }
+
+        assert!(net.is_empty());
+
+        // Inject second message
+        let route2 = topo.get_route(DimmId(0), DimmId(2));
+        net.inject(make_msg(2), route2);
+
+        while !net.is_empty() {
+            net.tick();
+        }
+
+        let stats = net.bandwidth_stats();
+        let link = stats
+            .iter()
+            .find(|s| s.from_dimm == DimmId(0) && s.to_dimm == DimmId(2))
+            .unwrap();
+        assert_eq!(link.messages_forwarded, 2);
+        // Since they do not overlap in time, the peak flits per tick should just be 1.
+        assert_eq!(link.peak_flits_per_tick, 1);
     }
 }
