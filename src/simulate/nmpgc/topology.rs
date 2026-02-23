@@ -5,6 +5,7 @@ pub(super) trait Topology {
     fn get_latency(&self, from: u8, to: u8) -> usize;
 }
 
+#[allow(dead_code)]
 struct FullyConnectedUniformTopology {
     latency: usize,
 }
@@ -63,7 +64,7 @@ impl Topology for LineTopology {
 
         let between_dimm_latency =
             self.dimm_latency_matrix[from_dimm.0 as usize][to_dimm.0 as usize];
-        return between_dimm_latency + Self::DIMM_TO_RANK_LATENCY * 2;
+        between_dimm_latency + Self::DIMM_TO_RANK_LATENCY * 2
     }
 }
 

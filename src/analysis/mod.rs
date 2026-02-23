@@ -54,7 +54,7 @@ impl Analysis {
         let num_roots = o.roots().len();
         // Write roots to raw memory for GC workers to use
         let root_pages_layout =
-            alloc::Layout::from_size_align(num_roots * size_of::<u64>(), 4096).unwrap();
+            alloc::Layout::from_size_align(std::mem::size_of_val(o.roots()), 4096).unwrap();
         // Manually create pages to hold roots on high enough address that MMTk
         // doesn't use so we have determinism.
         let root_pages_raw = unsafe {

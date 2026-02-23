@@ -12,6 +12,7 @@ use work::{NMPMessage, NMPProcessorWork, NMPProcessorWorkType};
 use super::memory::SetAssociativeCache;
 use super::tracing::TracingEvent;
 
+#[allow(clippy::upper_case_acronyms)]
 pub(crate) struct NMPGC<const LOG_NUM_THREADS: u8> {
     processors: Vec<NMPProcessor<LOG_NUM_THREADS>>,
     ticks: usize,

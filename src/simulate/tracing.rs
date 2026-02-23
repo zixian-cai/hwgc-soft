@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::io::Write;
 
+#[allow(dead_code)]
 pub(crate) enum InstantEventScope {
     Global,
     Process,
@@ -55,12 +56,10 @@ impl TracingEvent {
             name,
             ph: if dur.is_some() {
                 "X".to_string()
+            } else if begin {
+                "B".to_string()
             } else {
-                if begin {
-                    "B".to_string()
-                } else {
-                    "E".to_string()
-                }
+                "E".to_string()
             },
             ts,
             pid,
@@ -71,6 +70,7 @@ impl TracingEvent {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn new_instant_event(
         pid: u32,
         tid: u32,

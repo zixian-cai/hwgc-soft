@@ -19,6 +19,7 @@ pub(super) trait DataCache {
 }
 
 const LOG_LINE_SIZE: usize = 6; // Assuming a line size of 64 bytes
+#[allow(dead_code)]
 const LINE_SIZE: usize = 1 << LOG_LINE_SIZE;
 
 fn addr_to_line(addr: u64) -> u64 {
@@ -41,6 +42,7 @@ pub(super) struct FullyAssociativeCache {
 }
 
 impl FullyAssociativeCache {
+    #[allow(dead_code)]
     pub fn new(capacity: usize, rank_option: DDR4RankOption) -> Self {
         assert!(
             capacity >= LINE_SIZE && capacity % LINE_SIZE == 0,
@@ -205,6 +207,7 @@ impl PartialEq for RankID {
 }
 
 impl RankID {
+    #[allow(dead_code)]
     pub(crate) fn to_dict(&self) -> HashMap<String, Value> {
         let mut dict = HashMap::new();
         dict.insert("channel".to_string(), json!(self.channel()));

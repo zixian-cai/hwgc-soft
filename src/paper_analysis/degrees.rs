@@ -12,8 +12,8 @@ fn analyze_one_file(heapdump: &HeapDump) -> Result<LazyFrame> {
         objects.push(obj.start);
         for edge in &obj.edges {
             if edge.objref != 0 {
-                sources.push(obj.start as u64);
-                targets.push(edge.objref as u64);
+                sources.push(obj.start);
+                targets.push(edge.objref);
             }
         }
     }

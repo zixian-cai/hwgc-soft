@@ -258,7 +258,7 @@ impl super::Analysis {
         let tib_owner = self.get_owner_thread(tib_ptr as u64);
         let tib = unsafe { &*tib_ptr };
         let num_refs = tib.num_refs;
-        self.send_edges(tib_owner, (o as *mut u64).wrapping_add(2), num_refs as u64);
+        self.send_edges(tib_owner, (o as *mut u64).wrapping_add(2), num_refs);
     }
 
     fn do_scan_refarray(&mut self, o: u64) {

@@ -59,10 +59,8 @@ impl<O: ObjectModel> Packet for TracePacket<O> {
                         }
                     });
                 }
-            } else {
-                if cfg!(feature = "detailed_stats") {
-                    local.ne_slots += 1;
-                }
+            } else if cfg!(feature = "detailed_stats") {
+                local.ne_slots += 1;
             }
         }
         self.flush(local);

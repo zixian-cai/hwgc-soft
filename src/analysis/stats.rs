@@ -29,14 +29,14 @@ use std::{collections::HashMap, mem::Discriminant};
 ///
 /// Another classification is:
 /// 1. Visible slots:
-/// 1.a Visible, empty slot
-/// 1.b Visible, non-empty slot, visible child
-/// 1.c Visible, non-empty slot, invisible child: a ProcessNode message is sent.
+///    1.a Visible, empty slot
+///    1.b Visible, non-empty slot, visible child
+///    1.c Visible, non-empty slot, invisible child: a ProcessNode message is sent.
 /// 2. Invisible slots: need to send ProcessEdge/ProcessEdges messages
-/// 2.a Invisible slot, empty slot
-/// 2.b Invisible slot, non-empty slot, visible child
-/// 2.c Invisible slot, non-empty slot, invisible child: a ProcessNode message is
-/// sent.
+///    2.a Invisible slot, empty slot
+///    2.b Invisible slot, non-empty slot, visible child
+///    2.c Invisible slot, non-empty slot, invisible child: a ProcessNode message is
+///    sent.
 #[derive(Default)]
 pub(super) struct AnalysisStats {
     num_threads: usize,
