@@ -1,6 +1,6 @@
 use super::NMPProcessor;
 use crate::{
-    simulate::{memory::DataCache, nmpgc::topology::Topology, nmpgc::NMPGC},
+    simulate::{memory::DataCache, nmpgc::NMPGC},
     trace::trace_object,
     *,
 };
@@ -11,6 +11,16 @@ use std::collections::VecDeque;
 pub(super) struct NMPMessage {
     pub(super) recipient: usize,
     work: NMPMessageWork,
+}
+
+impl NMPMessage {
+    #[cfg(test)]
+    pub(super) fn new_mark(recipient: usize, addr: u64) -> Self {
+        NMPMessage {
+            recipient,
+            work: NMPMessageWork::Mark(addr),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -160,10 +170,10 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 }
             }
             NMPProcessorWork::SendMessage(msg) => {
-                let latency = self
-                    .topology
-                    .get_latency(self.id as u8, msg.recipient as u8);
-                push_stall(&mut self.works, latency);
+                // Sender pays only the local DIMM-to-rank latency to hand the
+                // message to the link controller; the network fabric handles
+                // hop-by-hop transit.
+                push_stall(&mut self.works, self.dimm_to_rank_latency);
                 trace!(
                     "[P{}] sending message to P{}: {:?}",
                     self.id,

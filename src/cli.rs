@@ -85,6 +85,8 @@ pub struct SimulationArgs {
     pub(crate) use_dramsim3: bool,
     #[arg(long, default_value = "configs/DDR4_8Gb_x8_3200.ini")]
     pub(crate) dramsim3_config: String,
+    #[arg(long, value_enum, default_value_t = TopologyChoice::Line)]
+    pub(crate) topology: TopologyChoice,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
@@ -92,6 +94,13 @@ pub struct SimulationArgs {
 pub enum SimulationArchitectureChoice {
     IdealTraceUtilization,
     NMPGC,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
+#[clap(rename_all = "verbatim")]
+pub enum TopologyChoice {
+    Line,
+    Ring,
 }
 
 #[derive(Subcommand, Debug)]
