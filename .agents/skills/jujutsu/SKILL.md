@@ -94,6 +94,8 @@ jj log -p
 jj show <change-id>
 
 # View diff of working copy
+# Default jj diff output is optimized for human reading in colored terminals.
+# Use jj diff --git to view diff in git-compatible format.
 jj diff
 ```
 
