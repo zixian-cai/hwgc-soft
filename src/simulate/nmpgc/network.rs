@@ -97,8 +97,8 @@ impl Network {
 
     /// Advance all in-flight messages by one cycle.
     /// Returns messages that have arrived at their destination DIMM.
-    /// The caller is responsible for adding the DIMM-to-rank latency
-    /// stall on the receiving end.
+    /// The recipient is responsible for adding the DIMM-to-rank latency
+    /// stall when reading from its inbox
     pub(super) fn tick(&mut self) -> Vec<NMPMessage> {
         // Calculate flits traversing each link in this tick.
         for count in self.current_tick_flits.values_mut() {

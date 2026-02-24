@@ -9,7 +9,6 @@ pub(super) trait Topology: Debug {
     fn get_links(&self) -> Vec<(DimmId, DimmId)>;
 
     /// Number of DIMMs in the topology.
-    #[allow(dead_code)]
     fn get_num_dimms(&self) -> u8;
 
     /// Prints a human-readable connection diagram showing DIMMs, their
@@ -38,9 +37,7 @@ pub(super) trait Topology: Debug {
     }
 
     /// Returns a sort key for a directed link so that link stats can be
-    /// printed in physical arrangement order. The key is `(group, is_reverse)`
-    /// where `group` identifies adjacent physical links and `is_reverse`
-    /// orders the forward direction before reverse.
+    /// printed in some "natural" physical arrangement order.
     fn link_sort_key(&self, from_dimm: DimmId, to_dimm: DimmId) -> (usize, bool);
 }
 
@@ -61,9 +58,10 @@ fn dimm_label(dimm_id: DimmId) -> String {
 
 #[derive(Clone)]
 pub(super) struct LineTopology {
-    /// DIMM ordering along the line: position_of[dimm_id] gives its index.
+    // FIXME: generalize to N DIMMs
+    /// DIMM ordering along the line: `position_of[dimm_id]` gives its index.
     pub(super) position_of: [usize; 4],
-    /// Inverse of `position_of`: dimm_at[position] gives the DIMM id.
+    /// Inverse of `position_of`: `dimm_at[position]` gives the DIMM id.
     dimm_at: [DimmId; 4],
 }
 
@@ -114,6 +112,9 @@ impl Topology for LineTopology {
         for i in 0..self.dimm_at.len() - 1 {
             let a = self.dimm_at[i];
             let b = self.dimm_at[i + 1];
+            // Canonicalize link representation: (min_id, max_id)
+            // The numerical representation of DIMM IDs doesn't intuitively
+            // correspond to their physical ordering.
             links.push((DimmId(a.0.min(b.0)), DimmId(a.0.max(b.0))));
         }
         links
@@ -136,9 +137,10 @@ impl Topology for LineTopology {
 
 #[derive(Clone)]
 pub(super) struct RingTopology {
+    // FIXME: generalize to N DIMMs
     /// DIMM ordering around the ring.
     dimm_at: [DimmId; 4],
-    /// Inverse: position_of[dimm_id] gives its index in the ring.
+    /// Inverse: `position_of[dimm_id]` gives its index in the ring.
     pub(super) position_of: [usize; 4],
 }
 
@@ -179,7 +181,9 @@ impl Topology for RingTopology {
         let ccw_dist = (from_pos + n - to_pos) % n;
 
         let mut route = Vec::new();
-        if cw_dist <= ccw_dist {
+        // Break ties for diametrically opposite nodes: even positions route clockwise,
+        // odd positions route counter-clockwise. This perfectly balances traffic across the ring.
+        if cw_dist < ccw_dist || (cw_dist == ccw_dist && from_pos % 2 == 0) {
             // Go clockwise
             for step in 0..cw_dist {
                 let cur = (from_pos + step) % n;

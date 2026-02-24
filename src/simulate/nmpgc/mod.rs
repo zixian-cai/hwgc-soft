@@ -173,8 +173,9 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         }
 
         // Network bandwidth stats (8 B per message, i.e. a 64-bit address)
-        const MESSAGE_SIZE_BYTES: f64 = 8.0;
-        const FLIT_SIZE_BYTES: f64 = MESSAGE_SIZE_BYTES / network::PER_HOP_LATENCY as f64;
+        const MESSAGE_SIZE_BYTES: usize = 8;
+        assert_eq!(MESSAGE_SIZE_BYTES % network::PER_HOP_LATENCY, 0);
+        const FLIT_SIZE_BYTES: usize = MESSAGE_SIZE_BYTES / network::PER_HOP_LATENCY;
         let total_time_s = self.ticks as f64 / (self.frequency_ghz * 1e9);
         for link in self.network.bandwidth_stats() {
             let key_prefix = format!("link_{}_to_{}", link.from_dimm, link.to_dimm);
@@ -186,13 +187,14 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 format!("{}.peak_flits_per_tick", key_prefix),
                 link.peak_flits_per_tick as f64,
             );
-            // Peak throughput demand in GB/s: peak_flits_per_tick * flit_size * freq_ghz
-            let peak_gbps = link.peak_flits_per_tick as f64 * FLIT_SIZE_BYTES * self.frequency_ghz;
+            // Peak throughput demand in GB/s
+            let peak_gbps =
+                link.peak_flits_per_tick as f64 * FLIT_SIZE_BYTES as f64 * self.frequency_ghz;
             stats.insert(format!("{}.peak_throughput_gbps", key_prefix), peak_gbps);
             // Average throughput in GB/s
             if total_time_s > 0.0 {
                 let avg_gbps =
-                    link.messages_forwarded as f64 * MESSAGE_SIZE_BYTES / total_time_s / 1e9;
+                    link.messages_forwarded as f64 * MESSAGE_SIZE_BYTES as f64 / total_time_s / 1e9;
                 stats.insert(format!("{}.avg_throughput_gbps", key_prefix), avg_gbps);
             }
             info!(
@@ -274,9 +276,10 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let mut link_stats = self.network.bandwidth_stats();
         link_stats.sort_by_key(|s| self.topology.link_sort_key(s.from_dimm, s.to_dimm));
         for link in &link_stats {
-            let peak_gbps = link.peak_flits_per_tick as f64 * FLIT_SIZE_BYTES * self.frequency_ghz;
+            let peak_gbps =
+                link.peak_flits_per_tick as f64 * FLIT_SIZE_BYTES as f64 * self.frequency_ghz;
             let avg_gbps = if total_time_s > 0.0 {
-                link.messages_forwarded as f64 * MESSAGE_SIZE_BYTES / total_time_s / 1e9
+                link.messages_forwarded as f64 * MESSAGE_SIZE_BYTES as f64 / total_time_s / 1e9
             } else {
                 0.0
             };
