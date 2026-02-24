@@ -6,10 +6,10 @@
 The NMPGC simulator previously modeled inter-processor communication as instantaneous message delivery with a latency-only stall on the sender. This ignored three properties of a real inter-DIMM network: messages traverse intermediate hops, links have finite bandwidth, and routing logic runs on the DIMM link controllers. We refactored the architecture into a route-aware topology layer and a cycle-accurate network fabric that forwards messages hop-by-hop, tracks per-link bandwidth using pipelined flits, and correctly applies handoff stalls (`dimm_to_rank_latency`) at both sender and receiver.
 
 ## Architecture
-- **`topology.rs`**: The `Topology` trait defines the physical DIMM interconnect. `get_route` returns the ordered directed links. `get_per_hop_latency()` returns the link traversal cost. `get_dimm_to_rank_latency()` returns the cost of moving a message between a rank and its link controller. `LineTopology` implements a `0 ↔ 2 ↔ 1 ↔ 3` layout using explicit position maps for O(1) route computation.
+- **`topology.rs`**: The `Topology` trait defines the physical DIMM interconnect. `get_route` returns the ordered directed links. `LineTopology` implements a `0 ↔ 2 ↔ 1 ↔ 3` layout using explicit position maps for O(1) route computation.
 - **`network.rs`**: The `Network` struct models the inter-DIMM fabric. It manages `InFlightMessage`s carrying the entire physical route, with a cursor and per-hop countdown timer to keep track of the progress of the message. `tick()` decrements timers and advances messages. Per-directed-link counters track active traversing flits via `current_tick_flits` to establish peak message demand.
 - **`work.rs`**: `SendMessage` and `ReadInbox` stall the processor for `dimm_to_rank_latency`—the local handoff cost. The network handles multi-hop transit asynchronously (modelled after having dedicated hardware for routing and forwarding).
-- **`mod.rs`**: Each tick of `NMPGC` (after ticking all `NMPProcessor`s) consists of: (1) injecting new messages into the network with routes (by querying the topology); (2) call into `Network` to advance in-flight messages; (3) `Network` returns messages that should arrive at their destination DIMM at this tick, which is then put is the inbox of the destination DIMM. When the workload finishes, network statistics are printed.
+- **`mod.rs`**: Each tick of `NMPGC` (after ticking all `NMPProcessor`s) consists of: (1) injecting new messages into the network with routes (by querying the topology); (2) calling into `Network` to advance in-flight messages; (3) `Network` returning messages that arrive at their destination DIMM at this tick, which are then put in the inbox of the destination processor. When the workload finishes, network statistics are printed.
 - **`cli.rs`**: Allow run-time selectable topology through `--topology <Line|Ring|FullyConnected>` flag.
 
 ## Design Decisions & Lessons Learned
@@ -35,8 +35,6 @@ The NMPGC simulator previously modeled inter-processor communication as instanta
 // Walk positions 0→1→2→3 → links (0,2), (2,1), (1,3)
 ```
 
-The latency matrix is retained for backwards compatibility with `get_latency()` and validated by `test_line_topology_route_consistency`, which asserts that `route.len() * per_hop_latency + 2 * dimm_to_rank_latency` equals the matrix-derived latency for every pair.
-
 ### 3. Bandwidth Tracking via Pipelined Flits
 
 **Challenge**: Lumping an entire 64-bit message into a single tick upon injection (`peak_tick_counts`) artificially inflated peak bandwidth spikes.
@@ -47,16 +45,13 @@ The latency matrix is retained for backwards compatibility with `get_latency()` 
 
 **Lesson**: Model bandwidth at the cycle resolution of the transfer interconnect (the flit) to derive accurate peak throughput.
 
-### 4. Same-DIMM Message Bypass
-Messages between ranks on the same DIMM bypass the network entirely and deliver directly to the recipient's inbox. The sender stalls for `DIMM_TO_RANK_LATENCY` (2 cycles) without traversing any network link.
-
-### 5. Topology Extensibility
+### 4. Topology Extensibility
 The `Topology` trait is agnostic. We implemented `RingTopology` (which wraps DIMM 3 to DIMM 0) and `FullyConnectedTopology`. `RingTopology` routing automatically selects the shortest path. The `Network` struct operates on arbitrary routes provided by the topology trait without internal modification.
 
-### 6. Human-Readable Output Formatting
+### 5. Human-Readable Output Formatting
 The simulator outputs a formatted diagram of the active topology via a generalized `Topology::print_diagram()`. This logic converts any topology's links into an adjacency list printed alongside the DIMMs physical location (e.g. `DIMM2 (C0-D1)`). Furthermore, network link traffic statistics are sorted by physical connection order rather than DIMM ID, making it much easier to trace traffic bottlenecks. Numbers are scaled with thousands separators for readability.
 
-### 7. Load Balancing in Symmetric Rings
+### 6. Load Balancing in Symmetric Rings
 
 **Challenge**: In a symmetric ring (like 4 nodes, 0-2-1-3-0), traffic between diametrically opposite pairs (e.g., 0 ↔ 1) is equidistant in both directions (2 hops).
 
