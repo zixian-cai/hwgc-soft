@@ -56,7 +56,7 @@ fn dimm_label(dimm_id: DimmId) -> String {
 
 // ─── Line Topology ──────────────────────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct LineTopology {
     // FIXME: generalize to N DIMMs
     /// DIMM ordering along the line: `position_of[dimm_id]` gives its index.
@@ -79,12 +79,6 @@ impl LineTopology {
             position_of,
             dimm_at,
         }
-    }
-}
-
-impl Debug for LineTopology {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LineTopology")
     }
 }
 
@@ -135,7 +129,7 @@ impl Topology for LineTopology {
 
 // ─── Ring Topology ──────────────────────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct RingTopology {
     // FIXME: generalize to N DIMMs
     /// DIMM ordering around the ring.
@@ -159,12 +153,6 @@ impl RingTopology {
             dimm_at,
             position_of,
         }
-    }
-}
-
-impl Debug for RingTopology {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "RingTopology")
     }
 }
 
@@ -238,7 +226,7 @@ impl Topology for RingTopology {
 
 // ─── Fully Connected Topology ───────────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct FullyConnectedTopology {
     num_dimms: usize,
 }
@@ -246,12 +234,6 @@ pub(super) struct FullyConnectedTopology {
 impl FullyConnectedTopology {
     pub(super) fn new(num_dimms: usize) -> Self {
         FullyConnectedTopology { num_dimms }
-    }
-}
-
-impl Debug for FullyConnectedTopology {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "FullyConnectedTopology")
     }
 }
 
@@ -384,10 +366,44 @@ mod tests {
         let topology = RingTopology::new();
         // DIMM 0 -> DIMM 1: positions 0 and 2, equidistant (2 hops each way).
         // Clockwise: 0->2->1 (2 hops), CCW: 0->3->1 (2 hops).
-        // With tie-break favoring clockwise, route is 0->2, 2->1.
-        let route = topology.get_route(DimmId(0), DimmId(1));
-        assert_eq!(route.len(), 2);
-        assert_eq!(route, vec![(DimmId(0), DimmId(2)), (DimmId(2), DimmId(1))]);
+        // With tie-break favoring parity (even position 0), route is 0->2, 2->1 (CW).
+        let route01 = topology.get_route(DimmId(0), DimmId(1));
+        assert_eq!(route01.len(), 2);
+        assert_eq!(
+            route01,
+            vec![(DimmId(0), DimmId(2)), (DimmId(2), DimmId(1))]
+        );
+
+        // DIMM 1 -> DIMM 0: positions 2 and 0, equidistant.
+        // Clockwise: 1->3->0 (2 hops), CCW: 1->2->0 (2 hops).
+        // With tie-break favoring parity (even position 2), route is 1->3, 3->0 (CW).
+        // Note: they both go CW but use different physical links!
+        let route10 = topology.get_route(DimmId(1), DimmId(0));
+        assert_eq!(route10.len(), 2);
+        assert_eq!(
+            route10,
+            vec![(DimmId(1), DimmId(3)), (DimmId(3), DimmId(0))]
+        );
+
+        // DIMM 2 -> DIMM 3: positions 1 and 3, equidistant.
+        // Clockwise: 2->1->3 (2 hops), CCW: 2->0->3 (2 hops).
+        // With tie-break favoring parity (odd position 1), route is 2->0, 0->3 (CCW).
+        let route23 = topology.get_route(DimmId(2), DimmId(3));
+        assert_eq!(route23.len(), 2);
+        assert_eq!(
+            route23,
+            vec![(DimmId(2), DimmId(0)), (DimmId(0), DimmId(3))]
+        );
+
+        // DIMM 3 -> DIMM 2: positions 3 and 1, equidistant.
+        // Clockwise: 3->0->2 (2 hops), CCW: 3->1->2 (2 hops).
+        // With tie-break favoring parity (odd position 3), route is 3->1, 1->2 (CCW).
+        let route32 = topology.get_route(DimmId(3), DimmId(2));
+        assert_eq!(route32.len(), 2);
+        assert_eq!(
+            route32,
+            vec![(DimmId(3), DimmId(1)), (DimmId(1), DimmId(2))]
+        );
     }
 
     #[test]
@@ -431,14 +447,53 @@ mod tests {
     }
 
     #[test]
+    fn test_ring_topology_load_balancing() {
+        let topology = RingTopology::new();
+        let mut link_counts = std::collections::HashMap::new();
+
+        // Exercise all diametrically opposite pairs (distance 2) in both directions.
+        // Paths: 0->1, 1->0, 2->3, 3->2
+        let pairs = vec![
+            (DimmId(0), DimmId(1)),
+            (DimmId(1), DimmId(0)),
+            (DimmId(2), DimmId(3)),
+            (DimmId(3), DimmId(2)),
+        ];
+
+        for (from, to) in pairs {
+            let route = topology.get_route(from, to);
+            assert_eq!(route.len(), 2, "Opposite pairs should be 2 hops");
+            for link in route {
+                *link_counts.entry(link).or_insert(0) += 1;
+            }
+        }
+
+        // Each of the 8 directed links should be used exactly once.
+        let all_links = topology.get_links();
+        assert_eq!(all_links.len(), 4);
+
+        for &(u, v) in &all_links {
+            assert_eq!(
+                *link_counts.get(&(u, v)).unwrap_or(&0),
+                1,
+                "Link {:?} should be used once",
+                (u, v)
+            );
+            assert_eq!(
+                *link_counts.get(&(v, u)).unwrap_or(&0),
+                1,
+                "Link {:?} should be used once",
+                (v, u)
+            );
+        }
+    }
+
+    #[test]
     fn test_ring_topology_route_symmetry() {
         let topology = RingTopology::new();
         // All routes should have the same hop count in both directions.
         for from in 0u8..4 {
-            for to in 0u8..4 {
-                if from == to {
-                    continue;
-                }
+            for to in (from + 1)..4 {
                 let fwd = topology.get_route(DimmId(from), DimmId(to));
                 let rev = topology.get_route(DimmId(to), DimmId(from));
                 assert_eq!(

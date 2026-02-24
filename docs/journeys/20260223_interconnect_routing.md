@@ -7,10 +7,10 @@ The NMPGC simulator previously modeled inter-processor communication as instanta
 
 ## Architecture
 - **`topology.rs`**: The `Topology` trait defines the physical DIMM interconnect. `get_route` returns the ordered directed links. `get_per_hop_latency()` returns the link traversal cost. `get_dimm_to_rank_latency()` returns the cost of moving a message between a rank and its link controller. `LineTopology` implements a `0 ↔ 2 ↔ 1 ↔ 3` layout using explicit position maps for O(1) route computation.
-- **`network.rs`**: The `Network` struct models the inter-DIMM fabric. It manages `InFlightMessage`s carrying a remaining physical route and a countdown timer. `tick()` decrements timers and advances messages. Per-directed-link counters track active traversing flits via `current_tick_flits` to establish peak message demand. Constants `PER_HOP_LATENCY` (4 cycles) and `DIMM_TO_RANK_LATENCY` (2 cycles) reside here.
-- **`work.rs`**: `SendMessage` and `ReadInbox` stall the processor for `dimm_to_rank_latency` (2 cycles)—the local handoff cost. The network handles multi-hop transit asynchronously.
-- **`mod.rs`**: `NMPGC` dynamically resolves the topology trait. Each tick: (1) processors execute and yield outgoing messages; (2) messages are injected with topology routes; (3) the network advances in-flight messages; (4) arrived messages enter recipient inboxes. Statistics output physical link throughput dynamically calculated from peak pipeline flits.
-- **`cli.rs`**: Added `--topology <Line|Ring|FullyConnected>` flag.
+- **`network.rs`**: The `Network` struct models the inter-DIMM fabric. It manages `InFlightMessage`s carrying the entire physical route, with a cursor and per-hop countdown timer to keep track of the progress of the message. `tick()` decrements timers and advances messages. Per-directed-link counters track active traversing flits via `current_tick_flits` to establish peak message demand.
+- **`work.rs`**: `SendMessage` and `ReadInbox` stall the processor for `dimm_to_rank_latency`—the local handoff cost. The network handles multi-hop transit asynchronously (modelled after having dedicated hardware for routing and forwarding).
+- **`mod.rs`**: Each tick of `NMPGC` (after ticking all `NMPProcessor`s) consists of: (1) injecting new messages into the network with routes (by querying the topology); (2) call into `Network` to advance in-flight messages; (3) `Network` returns messages that should arrive at their destination DIMM at this tick, which is then put is the inbox of the destination DIMM. When the workload finishes, network statistics are printed.
+- **`cli.rs`**: Allow run-time selectable topology through `--topology <Line|Ring|FullyConnected>` flag.
 
 ## Design Decisions & Lessons Learned
 
@@ -22,12 +22,12 @@ The NMPGC simulator previously modeled inter-processor communication as instanta
 
 **Solution**: Processors stall for `DIMM_TO_RANK_LATENCY` (2 cycles) during both `SendMessage` (rank-to-controller) and `ReadInbox` (controller-to-rank). The link controller handles forwarding autonomously.
 
-**Lesson**: Do not couple independent delays. Transmit and receive edge delays must use the modeled hardware parameter.
+**Lesson**: Do not stall the `NMPProcessor` unnecessarily when the task can be handed off asynchronously.
 
 ### 2. Route Computation via Position Maps
-**Challenge**: The original `LineTopology` stored a 4×4 latency matrix but had no concept of routing. Computing routes from a latency matrix requires pathfinding, which is fragile and O(n²).
+**Challenge**: The original `LineTopology` stored a 4×4 latency matrix but had no concept of routing, which is unsuitable for computing physical link routes to simulate per-link behaviors.
 
-**Solution**: `LineTopology` stores two arrays: `dimm_at[position]` (the DIMM at each line position) and `position_of[dimm_id]` (the position of each DIMM). Route computation walks between positions:
+**Solution**: Each topology now implements its own routing algorithm. For example, `LineTopology` stores two arrays: `dimm_at[position]` (the DIMM at each line position) and `position_of[dimm_id]` (the position of each DIMM). Route computation walks between positions:
 
 ```rust
 // Route from DIMM 0 to DIMM 3 on line [0, 2, 1, 3]:
@@ -55,6 +55,20 @@ The `Topology` trait is agnostic. We implemented `RingTopology` (which wraps DIM
 
 ### 6. Human-Readable Output Formatting
 The simulator outputs a formatted diagram of the active topology via a generalized `Topology::print_diagram()`. This logic converts any topology's links into an adjacency list printed alongside the DIMMs physical location (e.g. `DIMM2 (C0-D1)`). Furthermore, network link traffic statistics are sorted by physical connection order rather than DIMM ID, making it much easier to trace traffic bottlenecks. Numbers are scaled with thousands separators for readability.
+
+### 7. Load Balancing in Symmetric Rings
+
+**Challenge**: In a symmetric ring (like 4 nodes, 0-2-1-3-0), traffic between diametrically opposite pairs (e.g., 0 ↔ 1) is equidistant in both directions (2 hops).
+
+**Mistake**: A naive tie-breaker (e.g., `if cw_dist <= ccw_dist { route_cw() }`) causes all bidirectional traffic between opposite pairs to polarize onto the same physical links, leaving the reverse links idle and artificially bottlenecking the network throughput.
+
+**Solution**: Implement deterministic parity-based load balancing. For equidistant routes, the direction is chosen based on the parity of the source node's position:
+- **Even** source position: Route Clockwise (`cw`).
+- **Odd** source position: Route Counter-Clockwise (`ccw`).
+
+This ensures that for any opposite pair (u, v), traffic from $u \to v$ and $v \to u$ utilizes different edges, resulting in perfect link utilization across the entire ring.
+
+**Lesson**: Symmetric topologies require explicit tie-breaking strategies to distribute load. Without parity or randomized routing, "shortest path" logic can accidentally create hot links.
 
 ## Interconnect Model in Detail
 
@@ -85,7 +99,7 @@ Each active cycle a message traverses a link, it increments `current_tick_flits`
 Peak throughput demand for a link is: `peak_flits_per_tick × 2 B × freq_GHz`. For a DDR4-3200 system at 1.6 GHz, two interacting flits per tick equals 6.4 GB/s.
 
 ## Verification
-All 21 unit tests pass (`cargo test`). `cargo clippy` and `cargo fmt` produce no warnings or changes.
+All 26 unit tests pass (`cargo test`). `cargo clippy` and `cargo fmt` produce no warnings or changes.
 
 ### Performance Comparison with Master
 Simulation on `fop/heapdump.2.binpb.zst`, 8 processors, `Line` topology:
