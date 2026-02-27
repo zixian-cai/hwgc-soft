@@ -103,6 +103,8 @@ fn main() {
         );
         let dst = cmake::Config::new(&dramsim3_src)
             .define("CMAKE_BUILD_TYPE", "Release")
+            // Required when I test with cmake 4.2.2
+            .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5")
             // We explicitly build the 'dramsim3' target.
             // By default, cmake-rs attempts to build the 'install' target,
             // which we want to avoid as we only need the static library.
