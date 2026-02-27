@@ -1,6 +1,6 @@
 use super::NMPProcessor;
 use crate::{
-    simulate::{memory::DataCache, nmpgc::NMPGC},
+    simulate::{memory::{DataCache, VirtualAddress}, nmpgc::NMPGC},
     trace::trace_object,
     *,
 };
@@ -119,9 +119,9 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         match work {
             NMPProcessorWork::Mark(o) => {
                 trace!("[P{}] marking object {}", self.id, o);
-                let read_latency = self.cache.read(o);
+                let read_latency = self.cache.read(VirtualAddress(o));
                 if unsafe { trace_object(o, 1) } {
-                    let write_latency = self.cache.write(o);
+                    let write_latency = self.cache.write(VirtualAddress(o));
                     push_stall(&mut self.works, read_latency + write_latency);
                     self.marked_objects += 1;
                     O::scan_object(o, |edge, repeat| {
@@ -143,7 +143,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             }
             NMPProcessorWork::Load(e) => {
                 let child = unsafe { *e };
-                let latency = self.cache.read(e as u64);
+                let latency = self.cache.read(VirtualAddress(e as u64));
                 push_stall(&mut self.works, latency);
                 if child != 0 {
                     let owner = NMPGC::<LOG_NUM_THREADS>::get_owner_processor(child);

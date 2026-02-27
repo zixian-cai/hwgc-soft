@@ -14,6 +14,22 @@ Pre-sampled heapdumps live under `../heapdumps/sampled/`, organized by DaCapo be
 Pre-built heapdumps can be downloaded [here](https://gist.github.com/caizixian/74c5c30eb653169288ccbe754afece67).
 The snapshot format is defined in `heapdump.proto`.
 
+Benchmarks vary significantly in memory footprint.
+To find a workload with a specific characteristic (e.g., large heap for TLB pressure testing), consult the table below.
+
+| Benchmark | Files | Largest | Benchmark | Files | Largest |
+|-----------|------:|--------:|-----------|------:|--------:|
+| pmd       |    20 |   93 MB | biojava   |    20 |   41 MB |
+| eclipse   |    20 |   34 MB | tradesoap |    20 |   34 MB |
+| cassandra |    20 |   23 MB | spring    |    20 |   19 MB |
+| jython    |    20 |    9 MB | h2o       |    20 |    8 MB |
+| kafka     |     7 |    8 MB | lusearch  |    20 |    4 MB |
+| graphchi  |    20 |    4 MB | fop       |    20 |    4 MB |
+| sunflow   |    20 |    3 MB | xalan     |    20 |    2 MB |
+
+`fop/heapdump.2.binpb.zst` is the standard quick-test workload.
+For stress-testing TLB or cache behaviour, use `pmd/heapdump.33.binpb.zst` (93 MB).
+
 ### Generating heapdumps
 The prebuilt OpenJDK capable of producing heapdumps can be downloaded [here](https://builds.mmtk.io/heapdumps/alveo-2024-01-12-Fri-122525-subset/jdk-11.0.19-internal+0_linux-x64_bin.tar.gz).
 
@@ -63,6 +79,7 @@ Any snapshot under `../heapdumps/sampled/` works. `fop/heapdump.2.binpb.zst` is 
 
 The simulation is deterministic: identical output after a pure refactoring confirms no behavioural change.
 
+Use `--page-size` to configure TLB page size (`FourKB`, `TwoMB`, `FourMB` (default), `OneGB`).
 Use `-a IdealTraceUtilization` instead of `-a NMPGC` to measure [idealized trace utilization](https://dl.acm.org/doi/10.1145/1837855.1806653).
 
 ### Evaluating tracing loops
@@ -126,4 +143,5 @@ This serves both as long-term memory for agents and as documentation for human r
 - [2026-02-19 DRAMsim3 Integration](./docs/journeys/20260219_dramsim3_integration_summary.md)
 - [2026-02-21 Cache Interface Refactor](./docs/journeys/20260221_cache_interface_refactor.md)
 - [2026-02-23 Inter-DIMM Interconnect and Routing](./docs/journeys/20260223_interconnect_routing.md)
+- [2026-02-27 TLB and Virtual Memory](./docs/journeys/20260227_tlb_virtual_memory.md)
 
