@@ -145,8 +145,10 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let mut total_read_misses = 0;
         let mut total_write_hits = 0;
         let mut total_write_misses = 0;
-        let mut total_tlb_hits = 0;
-        let mut total_tlb_misses = 0;
+        let mut total_tlb_read_hits = 0;
+        let mut total_tlb_read_misses = 0;
+        let mut total_tlb_write_hits = 0;
+        let mut total_tlb_write_misses = 0;
 
         for processor in &self.processors {
             let tlb = &processor.cache.tlb.stats;
@@ -176,8 +178,10 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             total_read_misses += processor.cache.stats.read_misses;
             total_write_hits += processor.cache.stats.write_hits;
             total_write_misses += processor.cache.stats.write_misses;
-            total_tlb_hits += processor.cache.tlb.stats.total_hits();
-            total_tlb_misses += processor.cache.tlb.stats.total_misses();
+            total_tlb_read_hits += processor.cache.tlb.stats.read_hits;
+            total_tlb_read_misses += processor.cache.tlb.stats.read_misses;
+            total_tlb_write_hits += processor.cache.tlb.stats.write_hits;
+            total_tlb_write_misses += processor.cache.tlb.stats.write_misses;
         }
         // This is to output in a format similar to FireSim simulation
         for processor in &self.processors {
@@ -237,8 +241,20 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let read_hit_rate = total_read_hits as f64 / (total_read_hits + total_read_misses) as f64;
         let write_hit_rate =
             total_write_hits as f64 / (total_write_hits + total_write_misses) as f64;
+        let total_tlb_hits = total_tlb_read_hits + total_tlb_write_hits;
+        let total_tlb_misses = total_tlb_read_misses + total_tlb_write_misses;
         let tlb_hit_rate = if total_tlb_hits + total_tlb_misses > 0 {
             total_tlb_hits as f64 / (total_tlb_hits + total_tlb_misses) as f64
+        } else {
+            0.0
+        };
+        let tlb_read_hit_rate = if total_tlb_read_hits + total_tlb_read_misses > 0 {
+            total_tlb_read_hits as f64 / (total_tlb_read_hits + total_tlb_read_misses) as f64
+        } else {
+            0.0
+        };
+        let tlb_write_hit_rate = if total_tlb_write_hits + total_tlb_write_misses > 0 {
+            total_tlb_write_hits as f64 / (total_tlb_write_hits + total_tlb_write_misses) as f64
         } else {
             0.0
         };
@@ -278,15 +294,21 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         println!();
         println!("TLB (aggregate):");
         println!(
-            "  Hits:         {:>10}    Misses:       {:>10}    Hit rate: {:.3}",
-            Self::format_thousands(total_tlb_hits),
-            Self::format_thousands(total_tlb_misses),
-            tlb_hit_rate
+            "  Read hits:    {:>10}    Read misses:  {:>10}    Hit rate: {:.3}",
+            Self::format_thousands(total_tlb_read_hits),
+            Self::format_thousands(total_tlb_read_misses),
+            tlb_read_hit_rate
+        );
+        println!(
+            "  Write hits:   {:>10}    Write misses: {:>10}    Hit rate: {:.3}",
+            Self::format_thousands(total_tlb_write_hits),
+            Self::format_thousands(total_tlb_write_misses),
+            tlb_write_hit_rate
         );
         println!();
         println!("Per-Processor:");
         println!(
-            "  {:<4} {:>10} {:>10} {:>8} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "  {:<4} {:>10} {:>10} {:>8} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
             "P",
             "Marked",
             "Busy",
@@ -295,12 +317,14 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             "RdMiss",
             "WrHit",
             "WrMiss",
-            "TlbHit",
-            "TlbMiss"
+            "TlbRdHit",
+            "TlbRdMiss",
+            "TlbWrHit",
+            "TlbWrMiss"
         );
         for p in &self.processors {
             println!(
-                "  {:<4} {:>10} {:>10} {:>8.3} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+                "  {:<4} {:>10} {:>10} {:>8.3} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
                 p.id,
                 Self::format_thousands(p.marked_objects),
                 Self::format_thousands(p.busy_ticks),
@@ -309,8 +333,10 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 Self::format_thousands(p.cache.stats.read_misses),
                 Self::format_thousands(p.cache.stats.write_hits),
                 Self::format_thousands(p.cache.stats.write_misses),
-                Self::format_thousands(p.cache.tlb.stats.total_hits()),
-                Self::format_thousands(p.cache.tlb.stats.total_misses())
+                Self::format_thousands(p.cache.tlb.stats.read_hits),
+                Self::format_thousands(p.cache.tlb.stats.read_misses),
+                Self::format_thousands(p.cache.tlb.stats.write_hits),
+                Self::format_thousands(p.cache.tlb.stats.write_misses)
             );
         }
         println!();
@@ -354,8 +380,12 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         stats.insert("write_misses.sum".into(), total_write_misses as f64);
         stats.insert("read_hit_rate".into(), read_hit_rate);
         stats.insert("write_hit_rate".into(), write_hit_rate);
-        stats.insert("tlb_hits.sum".into(), total_tlb_hits as f64);
-        stats.insert("tlb_misses.sum".into(), total_tlb_misses as f64);
+        stats.insert("tlb_read_hits.sum".into(), total_tlb_read_hits as f64);
+        stats.insert("tlb_read_misses.sum".into(), total_tlb_read_misses as f64);
+        stats.insert("tlb_write_hits.sum".into(), total_tlb_write_hits as f64);
+        stats.insert("tlb_write_misses.sum".into(), total_tlb_write_misses as f64);
+        stats.insert("tlb_read_hit_rate".into(), tlb_read_hit_rate);
+        stats.insert("tlb_write_hit_rate".into(), tlb_write_hit_rate);
         stats.insert("tlb_hit_rate".into(), tlb_hit_rate);
         // in ms
         stats.insert("time".into(), time_ms);

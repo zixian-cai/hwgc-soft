@@ -81,9 +81,11 @@ pub(super) struct TlbStats {
 }
 
 impl TlbStats {
+    #[cfg(test)]
     pub(super) fn total_hits(&self) -> usize {
         self.read_hits + self.write_hits
     }
+    #[cfg(test)]
     pub(super) fn total_misses(&self) -> usize {
         self.read_misses + self.write_misses
     }
