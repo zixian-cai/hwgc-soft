@@ -28,3 +28,6 @@ target/
 dramsim3epoch.json
 scripts/naive_output.txt
 scripts/dramsim3_output.txt
+
+# Local reference repos
+/gem5

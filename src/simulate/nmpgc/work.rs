@@ -1,6 +1,9 @@
 use super::NMPProcessor;
 use crate::{
-    simulate::{memory::{DataCache, VirtualAddress}, nmpgc::NMPGC},
+    simulate::{
+        memory::{DataCache, VirtualAddress},
+        nmpgc::NMPGC,
+    },
     trace::trace_object,
     *,
 };

@@ -6,9 +6,9 @@
 The simulator lacked TLB modeling: all addresses were treated as raw `u64` values with no distinction between virtual and physical, and no translation latency. We added a set-associative TLB, a dummy page table walker (PTW), explicit `VirtualAddress`/`PhysicalAddress` types, and a VIPT (Virtually Indexed, Physically Tagged) cache latency model. The `--page-size` CLI flag controls TLB configuration at runtime.
 
 ## Architecture
-- **`src/simulate/memory.rs`**: Defines `VirtualAddress(u64)` and `PhysicalAddress(u64)` newtype wrappers. `PageSize` enum (FourKB, TwoMB, FourMB, OneGB) carries TLB entry count, associativity, and page shift. `PageTableWalker` performs identity mapping (VA == PA) with a fixed 30-cycle latency. `Tlb` is a set-associative LRU cache using `lru::LruCache` per set. `DataCache::read`/`write` now accept `VirtualAddress` and return total latency including TLB effects. Both `FullyAssociativeCache` and `SetAssociativeCache` embed a `Tlb` and implement the VIPT model. All DRAM-facing code (`DDR4RankModel`, `DDR4RankNaive`, `DDR4RankDRAMsim3`, `BankState`) accepts `PhysicalAddress`.
-- **`src/cli.rs`**: `PageSizeChoice` enum and `--page-size` argument on `SimulationArgs` (defaults to `FourKB`).
-- **`src/simulate/nmpgc/mod.rs`**: Converts `PageSizeChoice` → `PageSize`, passes it through `NMPProcessor::new` to `SetAssociativeCache::new`. Aggregates TLB hits/misses across processors and prints them in both the aggregate summary and per-processor table.
+- **`src/simulate/memory.rs`**: Defines `VirtualAddress(u64)` and `PhysicalAddress(u64)` newtype wrappers. `PageSize` enum (FourKB, TwoMB, FourMB, OneGB) carries TLB entry count, associativity, and page shift. `PageTableWalker` performs identity mapping (VA == PA) with variable latency by page size (30/24/24/18 cycles for 4KB/2MB/4MB/1GB, modelling multi-level radix tree depth). `Tlb` is a set-associative LRU cache using `lru::LruCache` per set with read/write split statistics. `DataCache::read`/`write` now accept `VirtualAddress` and return total latency including TLB effects. Both `FullyAssociativeCache` and `SetAssociativeCache` embed a `Tlb` and implement the VIPT model with a `debug_assert!` guarding the set-index-in-page-offset invariant. All DRAM-facing code (`DDR4RankModel`, `DDR4RankNaive`, `DDR4RankDRAMsim3`, `BankState`) accepts `PhysicalAddress`.
+- **`src/cli.rs`**: `--page-size` argument on `SimulationArgs` uses `PageSize` directly from `memory.rs` (defaults to `FourMB`).
+- **`src/simulate/nmpgc/mod.rs`**: Passes `PageSize` through `NMPProcessor::new` to `SetAssociativeCache::new`. Aggregates TLB read/write hits/misses across processors and prints them in both the aggregate summary and per-processor table.
 - **`src/simulate/nmpgc/work.rs`**: Wraps `cache.read(o)` / `cache.write(o)` / `cache.read(e as u64)` in `VirtualAddress(...)`.
 
 ## Design Decisions & Lessons Learned
@@ -67,6 +67,7 @@ The 7 new tests cover:
 ### Performance Comparison
 
 Naive simulation, 8 processors. "Master" is commit `6073686537bc` (no TLB).
+PTW latency is now variable: 30/24/24/18 cycles for 4KB/2MB/4MB/1GB.
 
 #### `fop/heapdump.2.binpb.zst` (93,180 marked objects)
 
@@ -74,11 +75,11 @@ Naive simulation, 8 processors. "Master" is commit `6073686537bc` (no TLB).
 |:-------|------:|----------:|-----:|------------:|----------:|-------------:|-----------:|------------------:|
 | Master (no TLB) | 1,687,031 | 1.054 | 0.812 | 0.717 | 155,732 | — | — | — |
 | FourKB | 1,828,509 | 1.143 | 0.818 | 0.714 | 157,156 | 0.950 | 31,882 | +8.4% |
-| TwoMB | 1,685,585 | 1.053 | 0.812 | 0.717 | 155,628 | 1.000 | 147 | −0.09% |
-| FourMB | 1,685,969 | 1.054 | 0.812 | 0.717 | 155,636 | 1.000 | 80 | −0.06% |
-| OneGB | 1,686,293 | 1.054 | 0.812 | 0.717 | 155,655 | 1.000 | 28 | −0.04% |
+| TwoMB | 1,689,009 | 1.056 | 0.812 | 0.717 | 155,813 | 1.000 | 147 | +0.12% |
+| FourMB | 1,687,203 | 1.055 | 0.812 | 0.717 | 155,635 | 1.000 | 80 | +0.01% |
+| OneGB | 1,685,737 | 1.054 | 0.812 | 0.717 | 155,528 | 1.000 | 28 | −0.08% |
 
-4KB pages incur 31,882 TLB misses (5.0% miss rate) and 8.4% more total cycles. Pages ≥2MB reduce TLB misses to near-zero on this small workload.
+4KB pages incur 31,882 TLB misses (5.0% miss rate) and 8.4% more total cycles. Pages ≥2MB reduce TLB misses to near-zero on this small workload. With variable PTW latency, the remaining misses at larger page sizes cost fewer cycles, allowing OneGB to actually edge below Master.
 
 #### `pmd/heapdump.33.binpb.zst` (93 MB — largest available)
 
@@ -86,11 +87,11 @@ Naive simulation, 8 processors. "Master" is commit `6073686537bc` (no TLB).
 |:-------|------:|----------:|-----:|------------:|----------:|-------------:|-----------:|------------------:|
 | Master (no TLB) | 69,603,854 | 43.502 | 0.954 | 0.800 | 6,444,897 | — | — | — |
 | FourKB | 75,183,455 | 46.990 | 0.946 | 0.801 | 6,428,334 | 0.965 | 1,304,338 | +8.0% |
-| TwoMB | 71,850,957 | 44.907 | 0.952 | 0.801 | 6,430,059 | 0.984 | 581,620 | +3.2% |
-| FourMB | 71,584,801 | 44.741 | 0.950 | 0.800 | 6,443,929 | 0.988 | 437,852 | +2.8% |
-| OneGB | 69,666,466 | 43.542 | 0.953 | 0.800 | 6,442,425 | 1.000 | 29 | +0.09% |
+| TwoMB | 71,391,935 | 44.620 | 0.954 | 0.800 | 6,437,133 | 0.984 | 593,234 | +2.6% |
+| FourMB | 71,018,727 | 44.387 | 0.952 | 0.800 | 6,439,991 | 0.988 | 436,114 | +2.0% |
+| OneGB | 69,548,166 | 43.468 | 0.953 | 0.800 | 6,433,695 | 1.000 | 29 | −0.08% |
 
-The larger workload exposes meaningful TLB pressure across all page sizes. 4KB pages produce 1.3M TLB misses (3.5% miss rate), costing 8% more cycles. Even 2MB and 4MB pages show 2.8–3.2% overhead due to hundreds of thousands of TLB misses — this workload's address space exceeds the 32-entry TLB capacity at these page sizes. Only 1GB pages eliminate TLB overhead entirely (29 cold misses).
+The larger workload exposes meaningful TLB pressure across all page sizes. 4KB pages produce 1.3M TLB misses (3.5% miss rate), costing 8% more cycles. 2MB and 4MB pages show 2.0–2.6% overhead (reduced from 2.8–3.2% with the old fixed 30-cycle PTW, thanks to the lower 24-cycle walk latency). Only 1GB pages eliminate TLB overhead entirely (29 cold misses).
 
 ## Usage
 ```

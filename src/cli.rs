@@ -1,3 +1,4 @@
+use crate::simulate::PageSize;
 use crate::*;
 use clap::{Parser, Subcommand, ValueEnum};
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
@@ -87,17 +88,8 @@ pub struct SimulationArgs {
     pub(crate) dramsim3_config: String,
     #[arg(long, value_enum, default_value_t = TopologyChoice::Line)]
     pub(crate) topology: TopologyChoice,
-    #[arg(long, value_enum, default_value_t = PageSizeChoice::FourMB)]
-    pub(crate) page_size: PageSizeChoice,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]
-#[clap(rename_all = "verbatim")]
-pub enum PageSizeChoice {
-    FourKB,
-    TwoMB,
-    FourMB,
-    OneGB,
+    #[arg(long, value_enum, default_value_t = PageSize::FourMB)]
+    pub(crate) page_size: PageSize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]

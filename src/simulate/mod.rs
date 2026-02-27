@@ -7,6 +7,7 @@ use ideal_trace_utilization::IdealTraceUtilization;
 mod nmpgc;
 use nmpgc::NMPGC;
 mod memory;
+pub(crate) use memory::PageSize;
 mod tracing;
 
 trait SimulationArchitecture {

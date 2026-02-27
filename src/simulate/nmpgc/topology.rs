@@ -171,7 +171,7 @@ impl Topology for RingTopology {
         let mut route = Vec::new();
         // Break ties for diametrically opposite nodes: even source positions route clockwise,
         // odd source positions route counter-clockwise. This balances traffic across the ring.
-        if cw_dist < ccw_dist || (cw_dist == ccw_dist && from_pos % 2 == 0) {
+        if cw_dist < ccw_dist || (cw_dist == ccw_dist && from_pos.is_multiple_of(2)) {
             // Go clockwise
             for step in 0..cw_dist {
                 let cur = (from_pos + step) % n;
