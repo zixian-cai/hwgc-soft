@@ -95,7 +95,7 @@ The larger workload exposes meaningful TLB pressure across all page sizes. 4KB p
 ```
 cargo run -- <HEAPDUMP> -o OpenJDK simulate -p 8 -a NMPGC --page-size FourMB
 ```
-Valid `--page-size` values: `FourKB`, `TwoMB`, `FourMB` (default), `OneGB`.
+Valid `--page-size` values: `FourKB`, `TwoMB` (default), `FourMB`, `OneGB`.
 
 ## Known Limitations
 - The PTW uses identity mapping and a simplistic latency model; a more realistic implementation would need to implement distributed PTWs, implement a physical memory allocation scheme that produces a concrete page table, and make each level of page table entries cacheable.

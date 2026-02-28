@@ -88,7 +88,7 @@ pub struct SimulationArgs {
     pub(crate) dramsim3_config: String,
     #[arg(long, value_enum, default_value_t = TopologyChoice::Line)]
     pub(crate) topology: TopologyChoice,
-    #[arg(long, value_enum, default_value_t = PageSize::FourMB)]
+    #[arg(long, value_enum, default_value_t = PageSize::TwoMB)]
     pub(crate) page_size: PageSize,
 }
 

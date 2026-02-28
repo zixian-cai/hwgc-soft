@@ -333,7 +333,7 @@ impl Debug for SetAssociativeCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "SetAssociativeCache: {}-set {}-way)",
+            "SetAssociativeCache: {}-set {}-way",
             self.cache_sets.len(),
             self.cache_sets[0].cap()
         )
@@ -420,7 +420,7 @@ impl DataCache for SetAssociativeCache {
     /// is incurred.
     ///
     /// TLB miss: a page-table walk cannot be hidden because on real
-    /// hardware is the physical tag retreived from the PTW will need to be compared
+    /// hardware the physical tag retrieved from the PTW will need to be compared
     /// with the cache tag, and the cache entry potentially updated.
     ///
     /// Contrast with `FullyAssociativeCache::read`, which has no virtually
