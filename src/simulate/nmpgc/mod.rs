@@ -1,5 +1,5 @@
 use super::SimulationArchitecture;
-use crate::simulate::memory::{AddressMapping, DDR4RankOption};
+use crate::simulate::memory::{AddressMapping, DDR4RankOption, PageSize};
 use crate::simulate::memory::{DimmId, RankId};
 use crate::util::ticks_to_us;
 use crate::{ObjectModel, SimulationArgs};
@@ -72,7 +72,14 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
 
         // Convert &[u64] into Vec<u64>
         let mut processors: Vec<NMPProcessor<LOG_NUM_THREADS>> = (0..Self::NUM_THREADS)
-            .map(|id| NMPProcessor::new(id as usize, rank_option.clone(), dimm_to_rank_latency))
+            .map(|id| {
+                NMPProcessor::new(
+                    id as usize,
+                    rank_option.clone(),
+                    dimm_to_rank_latency,
+                    args.page_size,
+                )
+            })
             .collect();
         for root in object_model.roots() {
             let o = *root;
@@ -138,21 +145,44 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let mut total_read_misses = 0;
         let mut total_write_hits = 0;
         let mut total_write_misses = 0;
+        let mut total_tlb_read_hits = 0;
+        let mut total_tlb_read_misses = 0;
+        let mut total_tlb_write_hits = 0;
+        let mut total_tlb_write_misses = 0;
 
         for processor in &self.processors {
-            info!("[P{}] marked objects: {}, busy ticks: {}, utilization: {:.3}, read hits: {}, read misses: {}, write hits: {}, write misses: {}, idle -> read inbox: {}",
-                processor.id, processor.marked_objects, processor.busy_ticks,
+            let cache_stats = &processor.cache.stats;
+            let tlb = &processor.cache.tlb.stats;
+            info!(
+                "[P{}] marked objects: {}, busy ticks: {}, utilization: {:.3}, \
+                   read hits: {}, read misses: {}, write hits: {}, write misses: {}, \
+                   tlb rd_hit: {}, tlb rd_miss: {}, tlb wr_hit: {}, tlb wr_miss: {}, \
+                   idle -> read inbox: {}",
+                processor.id,
+                processor.marked_objects,
+                processor.busy_ticks,
                 processor.busy_ticks as f64 / self.ticks as f64,
-                processor.cache.stats.read_hits, processor.cache.stats.read_misses,
-                processor.cache.stats.write_hits, processor.cache.stats.write_misses,
-            processor.idle_readinbox_ticks);
+                cache_stats.read_hits,
+                cache_stats.read_misses,
+                cache_stats.write_hits,
+                cache_stats.write_misses,
+                tlb.read_hits,
+                tlb.read_misses,
+                tlb.write_hits,
+                tlb.write_misses,
+                processor.idle_readinbox_ticks
+            );
             info!("[P{}] work count: {:?}", processor.id, processor.work_count);
             total_marked_objects += processor.marked_objects;
             total_busy_ticks += processor.busy_ticks;
-            total_read_hits += processor.cache.stats.read_hits;
-            total_read_misses += processor.cache.stats.read_misses;
-            total_write_hits += processor.cache.stats.write_hits;
-            total_write_misses += processor.cache.stats.write_misses;
+            total_read_hits += cache_stats.read_hits;
+            total_read_misses += cache_stats.read_misses;
+            total_write_hits += cache_stats.write_hits;
+            total_write_misses += cache_stats.write_misses;
+            total_tlb_read_hits += tlb.read_hits;
+            total_tlb_read_misses += tlb.read_misses;
+            total_tlb_write_hits += tlb.write_hits;
+            total_tlb_write_misses += tlb.write_misses;
         }
         // This is to output in a format similar to FireSim simulation
         for processor in &self.processors {
@@ -212,6 +242,23 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let read_hit_rate = total_read_hits as f64 / (total_read_hits + total_read_misses) as f64;
         let write_hit_rate =
             total_write_hits as f64 / (total_write_hits + total_write_misses) as f64;
+        let total_tlb_hits = total_tlb_read_hits + total_tlb_write_hits;
+        let total_tlb_misses = total_tlb_read_misses + total_tlb_write_misses;
+        let tlb_hit_rate = if total_tlb_hits + total_tlb_misses > 0 {
+            total_tlb_hits as f64 / (total_tlb_hits + total_tlb_misses) as f64
+        } else {
+            0.0
+        };
+        let tlb_read_hit_rate = if total_tlb_read_hits + total_tlb_read_misses > 0 {
+            total_tlb_read_hits as f64 / (total_tlb_read_hits + total_tlb_read_misses) as f64
+        } else {
+            0.0
+        };
+        let tlb_write_hit_rate = if total_tlb_write_hits + total_tlb_write_misses > 0 {
+            total_tlb_write_hits as f64 / (total_tlb_write_hits + total_tlb_write_misses) as f64
+        } else {
+            0.0
+        };
         let time_ms = self.ticks as f64 / (self.frequency_ghz * 1e6);
 
         // Human-readable summary
@@ -246,14 +293,39 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             write_hit_rate
         );
         println!();
+        println!("TLB (aggregate):");
+        println!(
+            "  Read hits:    {:>10}    Read misses:  {:>10}    Hit rate: {:.3}",
+            Self::format_thousands(total_tlb_read_hits),
+            Self::format_thousands(total_tlb_read_misses),
+            tlb_read_hit_rate
+        );
+        println!(
+            "  Write hits:   {:>10}    Write misses: {:>10}    Hit rate: {:.3}",
+            Self::format_thousands(total_tlb_write_hits),
+            Self::format_thousands(total_tlb_write_misses),
+            tlb_write_hit_rate
+        );
+        println!();
         println!("Per-Processor:");
         println!(
-            "  {:<4} {:>10} {:>10} {:>8} {:>10} {:>10} {:>10} {:>10}",
-            "P", "Marked", "Busy", "Util", "RdHit", "RdMiss", "WrHit", "WrMiss"
+            "  {:<4} {:>10} {:>10} {:>8} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "P",
+            "Marked",
+            "Busy",
+            "Util",
+            "RdHit",
+            "RdMiss",
+            "WrHit",
+            "WrMiss",
+            "TlbRdHit",
+            "TlbRdMiss",
+            "TlbWrHit",
+            "TlbWrMiss"
         );
         for p in &self.processors {
             println!(
-                "  {:<4} {:>10} {:>10} {:>8.3} {:>10} {:>10} {:>10} {:>10}",
+                "  {:<4} {:>10} {:>10} {:>8.3} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
                 p.id,
                 Self::format_thousands(p.marked_objects),
                 Self::format_thousands(p.busy_ticks),
@@ -261,7 +333,11 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 Self::format_thousands(p.cache.stats.read_hits),
                 Self::format_thousands(p.cache.stats.read_misses),
                 Self::format_thousands(p.cache.stats.write_hits),
-                Self::format_thousands(p.cache.stats.write_misses)
+                Self::format_thousands(p.cache.stats.write_misses),
+                Self::format_thousands(p.cache.tlb.stats.read_hits),
+                Self::format_thousands(p.cache.tlb.stats.read_misses),
+                Self::format_thousands(p.cache.tlb.stats.write_hits),
+                Self::format_thousands(p.cache.tlb.stats.write_misses)
             );
         }
         println!();
@@ -305,6 +381,13 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         stats.insert("write_misses.sum".into(), total_write_misses as f64);
         stats.insert("read_hit_rate".into(), read_hit_rate);
         stats.insert("write_hit_rate".into(), write_hit_rate);
+        stats.insert("tlb_read_hits.sum".into(), total_tlb_read_hits as f64);
+        stats.insert("tlb_read_misses.sum".into(), total_tlb_read_misses as f64);
+        stats.insert("tlb_write_hits.sum".into(), total_tlb_write_hits as f64);
+        stats.insert("tlb_write_misses.sum".into(), total_tlb_write_misses as f64);
+        stats.insert("tlb_read_hit_rate".into(), tlb_read_hit_rate);
+        stats.insert("tlb_write_hit_rate".into(), tlb_write_hit_rate);
+        stats.insert("tlb_hit_rate".into(), tlb_hit_rate);
         // in ms
         stats.insert("time".into(), time_ms);
 
@@ -316,7 +399,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     id: usize,
     ticks: usize, // This is synchronized with the global ticks
@@ -337,7 +420,12 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
 }
 
 impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
-    fn new(id: usize, rank_option: DDR4RankOption, dimm_to_rank_latency: usize) -> Self {
+    fn new(
+        id: usize,
+        rank_option: DDR4RankOption,
+        dimm_to_rank_latency: usize,
+        page_size: PageSize,
+    ) -> Self {
         NMPProcessor {
             id,
             busy_ticks: 0,
@@ -346,7 +434,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             works: VecDeque::new(),
             ticks: 0,
             // 32 KB
-            cache: SetAssociativeCache::new(64, 8, rank_option),
+            cache: SetAssociativeCache::new(64, 8, rank_option, page_size),
             work_count: HashMap::new(),
             idle_ranges: vec![],
             idle_start: None,

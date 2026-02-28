@@ -35,7 +35,7 @@ impl SimulationArchitecture for IdealTraceUtilization {
     fn tick<O: ObjectModel>(&mut self) -> bool {
         // The number of objects in the traversal frontier at the end of the tick
         // At the end of tick 0, the frontier is the roots
-        if self.ticks % 100 == 0 {
+        if self.ticks.is_multiple_of(100) {
             self.frontier_sizes.push(self.tracing_queue.len() as u64);
             self.frontier_ticks.push(self.ticks as u64);
         }
