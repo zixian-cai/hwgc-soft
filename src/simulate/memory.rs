@@ -188,7 +188,7 @@ impl Tlb {
         let entries = Self::tlb_entries(page_size);
         let ways = Self::tlb_ways(page_size);
         debug_assert!(
-            entries % ways == 0,
+            entries.is_multiple_of(ways),
             "TLB entries ({}) must be divisible by ways ({})",
             entries,
             ways
@@ -210,11 +210,7 @@ impl Tlb {
     }
 
     /// Translates a virtual address to a physical address via the TLB.
-    pub fn translate(
-        &mut self,
-        vaddr: VirtualAddress,
-        is_write: bool,
-    ) -> TlbResp {
+    pub fn translate(&mut self, vaddr: VirtualAddress, is_write: bool) -> TlbResp {
         let vpn = vaddr.vpn(self.page_size);
         let setidx = self.get_setidx(vpn);
         if let Some(&ppn) = self.sets[setidx].get(&vpn) {
@@ -276,14 +272,11 @@ impl FullyAssociativeCache {
     #[allow(dead_code)]
     pub fn new(capacity: usize, rank_option: DDR4RankOption, page_size: PageSize) -> Self {
         assert!(
-            capacity >= LINE_SIZE
-                && capacity.is_multiple_of(LINE_SIZE),
+            capacity >= LINE_SIZE && capacity.is_multiple_of(LINE_SIZE),
             "Cache capacity must be a multiple of line size"
         );
         FullyAssociativeCache {
-            cache: LruCache::new(
-                NonZeroUsize::new(capacity / LINE_SIZE).unwrap(),
-            ),
+            cache: LruCache::new(NonZeroUsize::new(capacity / LINE_SIZE).unwrap()),
             stats: CacheStats::default(),
             rank: DDR4Rank::new(rank_option),
             tlb: Tlb::new(page_size),
