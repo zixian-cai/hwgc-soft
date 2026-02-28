@@ -151,6 +151,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let mut total_tlb_write_misses = 0;
 
         for processor in &self.processors {
+            let cache_stats = &processor.cache.stats;
             let tlb = &processor.cache.tlb.stats;
             info!(
                 "[P{}] marked objects: {}, busy ticks: {}, utilization: {:.3}, \
@@ -161,10 +162,10 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                 processor.marked_objects,
                 processor.busy_ticks,
                 processor.busy_ticks as f64 / self.ticks as f64,
-                processor.cache.stats.read_hits,
-                processor.cache.stats.read_misses,
-                processor.cache.stats.write_hits,
-                processor.cache.stats.write_misses,
+                cache_stats.read_hits,
+                cache_stats.read_misses,
+                cache_stats.write_hits,
+                cache_stats.write_misses,
                 tlb.read_hits,
                 tlb.read_misses,
                 tlb.write_hits,
@@ -174,14 +175,14 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
             info!("[P{}] work count: {:?}", processor.id, processor.work_count);
             total_marked_objects += processor.marked_objects;
             total_busy_ticks += processor.busy_ticks;
-            total_read_hits += processor.cache.stats.read_hits;
-            total_read_misses += processor.cache.stats.read_misses;
-            total_write_hits += processor.cache.stats.write_hits;
-            total_write_misses += processor.cache.stats.write_misses;
-            total_tlb_read_hits += processor.cache.tlb.stats.read_hits;
-            total_tlb_read_misses += processor.cache.tlb.stats.read_misses;
-            total_tlb_write_hits += processor.cache.tlb.stats.write_hits;
-            total_tlb_write_misses += processor.cache.tlb.stats.write_misses;
+            total_read_hits += cache_stats.read_hits;
+            total_read_misses += cache_stats.read_misses;
+            total_write_hits += cache_stats.write_hits;
+            total_write_misses += cache_stats.write_misses;
+            total_tlb_read_hits += tlb.read_hits;
+            total_tlb_read_misses += tlb.read_misses;
+            total_tlb_write_hits += tlb.write_hits;
+            total_tlb_write_misses += tlb.write_misses;
         }
         // This is to output in a format similar to FireSim simulation
         for processor in &self.processors {
