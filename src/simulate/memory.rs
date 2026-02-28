@@ -392,33 +392,43 @@ impl SetAssociativeCache {
         }
     }
 
-    /// VIPT: set index uses virtual address bits (within page offset), so
-    /// this can run concurrently with TLB translation.
-    fn get_set_idx(&self, vaddr: VirtualAddress) -> usize {
-        let line = vaddr.0 >> LOG_LINE_SIZE;
-        (line as usize) % self.cache_sets.len()
+    /// Extracts the set-index bits from the virtual address.
+    ///
+    /// See the VIPT invariant in the constructor.
+    ///
+    /// Note that the following implementation is probably equivalent
+    /// ```rust
+    /// let line = vaddr.0 >> LOG_LINE_SIZE;
+    /// (line as usize) % self.cache_sets.len()
+    /// ```
+    ///
+    /// But the following implementation is a more straightforward implementation
+    /// of the spec.
+    fn get_setidx(&self, vaddr: VirtualAddress) -> usize {
+        let set_index_mask = (self.cache_sets.len() - 1) as u64;
+        ((vaddr.0 >> LOG_LINE_SIZE) & set_index_mask) as usize
     }
 }
 
 impl DataCache for SetAssociativeCache {
     fn read(&mut self, addr: VirtualAddress) -> usize {
-        let set_idx = self.get_set_idx(addr);
-        let resp = self.tlb.translate(addr, false);
-        let line = resp.paddr.cache_line();
-        if self.cache_sets[set_idx].get(&line).is_some() {
+        let setidx = self.get_setidx(addr);
+        let tlb_resp = self.tlb.translate(addr, false);
+        let line = tlb_resp.paddr.cache_line();
+        if self.cache_sets[setidx].get(&line).is_some() {
             self.stats.read_hits += 1;
-            if resp.hit {
+            if tlb_resp.hit {
                 Self::HIT_LATENCY
             } else {
-                resp.latency + Self::HIT_LATENCY
+                tlb_resp.latency + Self::HIT_LATENCY
             }
         } else {
-            self.cache_sets[set_idx].put(line, ());
+            self.cache_sets[setidx].put(line, ());
             self.stats.read_misses += 1;
-            if resp.hit {
-                Self::HIT_LATENCY + self.rank.transaction(resp.paddr, false)
+            if tlb_resp.hit {
+                Self::HIT_LATENCY + self.rank.transaction(tlb_resp.paddr, false)
             } else {
-                resp.latency + Self::HIT_LATENCY + self.rank.transaction(resp.paddr, false)
+                tlb_resp.latency + Self::HIT_LATENCY + self.rank.transaction(tlb_resp.paddr, false)
             }
         }
     }
@@ -427,21 +437,21 @@ impl DataCache for SetAssociativeCache {
     /// state. The cache line is allocated (write-allocate) so subsequent reads
     /// can hit.
     fn write(&mut self, addr: VirtualAddress) -> usize {
-        let set_idx = self.get_set_idx(addr);
-        let resp = self.tlb.translate(addr, true);
-        let line = resp.paddr.cache_line();
-        if self.cache_sets[set_idx].get(&line).is_some() {
+        let setidx = self.get_setidx(addr);
+        let tlb_resp = self.tlb.translate(addr, true);
+        let line = tlb_resp.paddr.cache_line();
+        if self.cache_sets[setidx].get(&line).is_some() {
             self.stats.write_hits += 1;
         } else {
-            self.cache_sets[set_idx].put(line, ());
+            self.cache_sets[setidx].put(line, ());
             self.stats.write_misses += 1;
         }
-        let base = if resp.hit {
+        let base = if tlb_resp.hit {
             Self::HIT_LATENCY
         } else {
-            resp.latency + Self::HIT_LATENCY
+            tlb_resp.latency + Self::HIT_LATENCY
         };
-        base + self.rank.transaction(resp.paddr, true)
+        base + self.rank.transaction(tlb_resp.paddr, true)
     }
 }
 
