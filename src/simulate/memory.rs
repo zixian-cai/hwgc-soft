@@ -164,9 +164,10 @@ pub(super) struct Tlb {
 }
 
 impl Tlb {
-    // TODO: verify that Tlb::HIT_LATENCY < DataCache::HIT_LATENCY so there is
-    // no extra penalty compared with the non-TLB implementation when both TLB
-    // and cache hit.
+    // TODO: we currently have Tlb::HIT_LATENCY < SetAssociativeCache::HIT_LATENCY
+    // and for the SetAssociativeCache using VIPT, there is no extra penalty
+    // when both TLB and cache hit.
+    // Verify whether this behavior is realistic.
     pub const HIT_LATENCY: usize = 1;
 
     /// Number of TLB entries for a given page size.
@@ -290,17 +291,18 @@ impl FullyAssociativeCache {
 
 impl DataCache for FullyAssociativeCache {
     fn read(&mut self, addr: VirtualAddress) -> usize {
-        // Fully-associative: no set-index bits, so TLB must complete before
-        // the cache tag comparison.
-        let resp = self.tlb.translate(addr, false);
-        let line = resp.paddr.cache_line();
+        // Fully-associative: no set-index bits to support VIPT, and has to be
+        // physically tagged, and that address translation must complete
+        // before the cache tag comparison.
+        let tlb_resp = self.tlb.translate(addr, false);
+        let line = tlb_resp.paddr.cache_line();
         if self.cache.get(&line).is_some() {
             self.stats.read_hits += 1;
-            resp.latency + Self::HIT_LATENCY
+            tlb_resp.latency + Self::HIT_LATENCY
         } else {
             self.cache.put(line, ());
             self.stats.read_misses += 1;
-            resp.latency + Self::HIT_LATENCY + self.rank.transaction(resp.paddr, false)
+            tlb_resp.latency + Self::HIT_LATENCY + self.rank.transaction(tlb_resp.paddr, false)
         }
     }
 
@@ -308,15 +310,15 @@ impl DataCache for FullyAssociativeCache {
     /// state. The cache line is allocated (write-allocate) so subsequent reads
     /// can hit.
     fn write(&mut self, addr: VirtualAddress) -> usize {
-        let resp = self.tlb.translate(addr, true);
-        let line = resp.paddr.cache_line();
+        let tlb_resp = self.tlb.translate(addr, true);
+        let line = tlb_resp.paddr.cache_line();
         if self.cache.get(&line).is_some() {
             self.stats.write_hits += 1;
         } else {
             self.cache.put(line, ());
             self.stats.write_misses += 1;
         }
-        resp.latency + Self::HIT_LATENCY + self.rank.transaction(resp.paddr, true)
+        tlb_resp.latency + Self::HIT_LATENCY + self.rank.transaction(tlb_resp.paddr, true)
     }
 }
 
@@ -348,9 +350,9 @@ impl SetAssociativeCache {
     /// TLB translation (Virtually Indexed, Physically Tagged).
     ///
     /// Because set indexing uses address bits that are unchanged by
-    /// translation (i.e., within the page offset), multiple virtual aliases
+    /// translation (i.e., bits within the page offset), multiple virtual aliases
     /// of the same physical page index the same cache set and cannot cause
-    /// coherence issues.
+    /// consistency issues.
     /// See <https://comp.anu.edu.au/courses/comp3710-uarch/assets/lectures/week11-part2.pdf>.
     pub fn new(
         num_sets: usize,
