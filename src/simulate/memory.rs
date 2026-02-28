@@ -275,13 +275,13 @@ pub(super) struct FullyAssociativeCache {
 
 impl FullyAssociativeCache {
     #[allow(dead_code)]
-    pub fn new(capacity: usize, rank_option: DDR4RankOption, page_size: PageSize) -> Self {
+    pub fn new(capacity_byte: usize, rank_option: DDR4RankOption, page_size: PageSize) -> Self {
         assert!(
-            capacity >= LINE_SIZE && capacity.is_multiple_of(LINE_SIZE),
+            capacity_byte >= LINE_SIZE && capacity_byte.is_multiple_of(LINE_SIZE),
             "Cache capacity must be a multiple of line size"
         );
         FullyAssociativeCache {
-            cache: LruCache::new(NonZeroUsize::new(capacity / LINE_SIZE).unwrap()),
+            cache: LruCache::new(NonZeroUsize::new(capacity_byte / LINE_SIZE).unwrap()),
             stats: CacheStats::default(),
             rank: DDR4Rank::new(rank_option),
             tlb: Tlb::new(page_size),
@@ -295,12 +295,12 @@ impl DataCache for FullyAssociativeCache {
         // physically tagged, and that address translation must complete
         // before the cache tag comparison.
         let tlb_resp = self.tlb.translate(addr, false);
-        let line = tlb_resp.paddr.cache_line();
-        if self.cache.get(&line).is_some() {
+        let physical_tag = tlb_resp.paddr.cache_line();
+        if self.cache.get(&physical_tag).is_some() {
             self.stats.read_hits += 1;
             tlb_resp.latency + Self::HIT_LATENCY
         } else {
-            self.cache.put(line, ());
+            self.cache.put(physical_tag, ());
             self.stats.read_misses += 1;
             tlb_resp.latency + Self::HIT_LATENCY + self.rank.transaction(tlb_resp.paddr, false)
         }
@@ -311,11 +311,11 @@ impl DataCache for FullyAssociativeCache {
     /// can hit.
     fn write(&mut self, addr: VirtualAddress) -> usize {
         let tlb_resp = self.tlb.translate(addr, true);
-        let line = tlb_resp.paddr.cache_line();
-        if self.cache.get(&line).is_some() {
+        let physical_tag = tlb_resp.paddr.cache_line();
+        if self.cache.get(&physical_tag).is_some() {
             self.stats.write_hits += 1;
         } else {
-            self.cache.put(line, ());
+            self.cache.put(physical_tag, ());
             self.stats.write_misses += 1;
         }
         tlb_resp.latency + Self::HIT_LATENCY + self.rank.transaction(tlb_resp.paddr, true)
@@ -397,7 +397,7 @@ impl SetAssociativeCache {
     /// See the VIPT invariant in the constructor.
     ///
     /// Note that the following implementation is probably equivalent
-    /// ```rust
+    /// ```rust,ignore
     /// let line = vaddr.0 >> LOG_LINE_SIZE;
     /// (line as usize) % self.cache_sets.len()
     /// ```
@@ -411,11 +411,29 @@ impl SetAssociativeCache {
 }
 
 impl DataCache for SetAssociativeCache {
+    /// VIPT latency model: `get_setidx` uses virtual-address bits within the
+    /// page offset, so set lookup proceeds in parallel with TLB translation.
+    ///
+    /// TLB hit: the TLB completes in `Tlb::HIT_LATENCY` (1 cycle),
+    /// well before the cache tag comparison at `HIT_LATENCY` (4 cycles), so
+    /// the translation cost is fully absorbed and only normal cache latency
+    /// is incurred.
+    ///
+    /// TLB miss: a page-table walk cannot be hidden because on real
+    /// hardware is the physical tag retreived from the PTW will need to be compared
+    /// with the cache tag, and the cache entry potentially updated.
+    ///
+    /// Contrast with `FullyAssociativeCache::read`, which has no virtually
+    /// index cache and the physical tag needs to be retrieved before cache lookup.
+    /// As a result, the TLB lookup is serialized before the cache lookup.
     fn read(&mut self, addr: VirtualAddress) -> usize {
         let setidx = self.get_setidx(addr);
         let tlb_resp = self.tlb.translate(addr, false);
-        let line = tlb_resp.paddr.cache_line();
-        if self.cache_sets[setidx].get(&line).is_some() {
+        // The tag bits here actually include some of the index bits
+        // But since we are going to index into a set, this shouldn't affect
+        // the implemented cache capacity.
+        let physical_tag = tlb_resp.paddr.cache_line();
+        if self.cache_sets[setidx].get(&physical_tag).is_some() {
             self.stats.read_hits += 1;
             if tlb_resp.hit {
                 Self::HIT_LATENCY
@@ -423,7 +441,7 @@ impl DataCache for SetAssociativeCache {
                 tlb_resp.latency + Self::HIT_LATENCY
             }
         } else {
-            self.cache_sets[setidx].put(line, ());
+            self.cache_sets[setidx].put(physical_tag, ());
             self.stats.read_misses += 1;
             if tlb_resp.hit {
                 Self::HIT_LATENCY + self.rank.transaction(tlb_resp.paddr, false)
@@ -436,14 +454,17 @@ impl DataCache for SetAssociativeCache {
     /// Write-through: every write is forwarded to DRAM regardless of cache
     /// state. The cache line is allocated (write-allocate) so subsequent reads
     /// can hit.
+    ///
+    /// The VIPT latency model is the same as [`read`](Self::read), except that
+    /// the DRAM write latency is always added on top due to the write-through policy.
     fn write(&mut self, addr: VirtualAddress) -> usize {
         let setidx = self.get_setidx(addr);
         let tlb_resp = self.tlb.translate(addr, true);
-        let line = tlb_resp.paddr.cache_line();
-        if self.cache_sets[setidx].get(&line).is_some() {
+        let physical_tag = tlb_resp.paddr.cache_line();
+        if self.cache_sets[setidx].get(&physical_tag).is_some() {
             self.stats.write_hits += 1;
         } else {
-            self.cache_sets[setidx].put(line, ());
+            self.cache_sets[setidx].put(physical_tag, ());
             self.stats.write_misses += 1;
         }
         let base = if tlb_resp.hit {
@@ -769,24 +790,35 @@ mod tests {
     fn test_fully_associative_cache() {
         let mut cache = FullyAssociativeCache::new(64, DDR4RankOption::Naive, PageSize::FourKB);
         // First access to page: TLB miss, cache miss → includes PTW + DRAM
-        assert!(cache.read(VirtualAddress(0x1000)) > FullyAssociativeCache::HIT_LATENCY);
+        assert!(cache.read(VirtualAddress(0b1_000000_000000)) > FullyAssociativeCache::HIT_LATENCY);
         // Same page, cache hit, TLB hit → write still goes to DRAM (write-through)
-        assert!(cache.write(VirtualAddress(0x1000)) > FullyAssociativeCache::HIT_LATENCY);
+        assert!(
+            cache.write(VirtualAddress(0b1_000000_000000)) > FullyAssociativeCache::HIT_LATENCY
+        );
         // Same line, TLB hit (serialized), cache hit
         assert_eq!(
-            cache.read(VirtualAddress(0x1000)),
+            cache.read(VirtualAddress(0b1_000000_000000)),
             Tlb::HIT_LATENCY + FullyAssociativeCache::HIT_LATENCY
         );
         // Different page: TLB miss, cache miss
-        assert!(cache.read(VirtualAddress(0x2000)) > FullyAssociativeCache::HIT_LATENCY);
+        assert!(
+            cache.read(VirtualAddress(0b10_000000_000000)) > FullyAssociativeCache::HIT_LATENCY
+        );
         // Same page as 0x2000: TLB hit, write always → DRAM
-        assert!(cache.write(VirtualAddress(0x2000)) > FullyAssociativeCache::HIT_LATENCY);
+        assert!(
+            cache.write(VirtualAddress(0b10_000000_000000)) > FullyAssociativeCache::HIT_LATENCY
+        );
         // 0x1000 evicted from cache (capacity = 1 line) → cache miss
-        assert!(cache.read(VirtualAddress(0x1000)) > FullyAssociativeCache::HIT_LATENCY);
+        assert!(cache.read(VirtualAddress(0b1_000000_000000)) > FullyAssociativeCache::HIT_LATENCY);
         assert_eq!(cache.stats.read_hits, 1);
         assert_eq!(cache.stats.read_misses, 3);
         assert_eq!(cache.stats.write_hits, 2);
         assert_eq!(cache.stats.write_misses, 0);
+
+        assert_eq!(cache.tlb.stats.read_hits, 2);
+        assert_eq!(cache.tlb.stats.read_misses, 2);
+        assert_eq!(cache.tlb.stats.write_hits, 2);
+        assert_eq!(cache.tlb.stats.write_misses, 0);
     }
 
     #[test]
@@ -813,7 +845,8 @@ mod tests {
         );
         // Line 0 was evicted → cache miss (TLB still hit for this page)
         assert!(cache.read(VirtualAddress(0)) > SetAssociativeCache::HIT_LATENCY);
-        // Line 64 should still be in cache (different set)
+        // Line 64 should still be in cache (different set, since the first bit
+        // immediately higher than the bits within a cache line differs for a two-set cache)
         assert_eq!(
             cache.read(VirtualAddress(64)),
             SetAssociativeCache::HIT_LATENCY
@@ -822,6 +855,11 @@ mod tests {
         assert_eq!(cache.stats.read_misses, 4);
         assert_eq!(cache.stats.write_hits, 0);
         assert_eq!(cache.stats.write_misses, 0);
+
+        assert_eq!(cache.tlb.stats.read_hits, 7);
+        assert_eq!(cache.tlb.stats.read_misses, 1);
+        assert_eq!(cache.tlb.stats.write_hits, 0);
+        assert_eq!(cache.tlb.stats.write_misses, 0);
     }
 
     #[test]
@@ -853,6 +891,7 @@ mod tests {
     fn test_tlb_hit_miss() {
         let mut tlb = Tlb::new(PageSize::FourKB);
         // Miss on first access (read)
+        // Note 0x1000 = 4096
         let resp = tlb.translate(VirtualAddress(0x1000), false);
         assert_eq!(resp.paddr, PhysicalAddress(0x1000)); // identity mapping
         assert_eq!(resp.latency, PageTableWalker::latency(PageSize::FourKB));
@@ -873,7 +912,8 @@ mod tests {
         // 64 entries, 4-way, 16 sets. Fill one set (4 pages mapping to same set)
         let pages_per_set = Tlb::tlb_ways(PageSize::FourKB);
         let num_sets = Tlb::tlb_entries(PageSize::FourKB) / pages_per_set;
-        // Access pages that all map to set 0: strides of num_sets pages
+        // The first and the last page both map to set 0: strides of num_sets pages
+        // Note: 1<<12 = 4096
         for i in 0..=pages_per_set {
             let addr = VirtualAddress((i as u64) * (num_sets as u64) * (1u64 << 12));
             tlb.translate(addr, false);
@@ -937,6 +977,10 @@ mod tests {
         // TLB hit + cache hit
         let lat = cache.read(VirtualAddress(0x1000));
         assert_eq!(lat, SetAssociativeCache::HIT_LATENCY);
+        assert_eq!(cache.stats.read_hits, 1);
+        assert_eq!(cache.stats.read_misses, 1);
+        assert_eq!(cache.tlb.stats.read_hits, 1);
+        assert_eq!(cache.tlb.stats.read_misses, 1);
     }
 
     #[test]
@@ -945,11 +989,11 @@ mod tests {
         // Warm up TLB for 0x1xxx page
         cache.read(VirtualAddress(0x1000));
         // Access different line on same page: TLB hit, cache miss
-        let lat = cache.read(VirtualAddress(0x1100));
-        let ptw = PageTableWalker::latency(PageSize::FourKB);
+        let e2e_latency = cache.read(VirtualAddress(0x1100));
         // cache miss → HIT_LATENCY + DRAM, no PTW penalty
-        assert!(lat > SetAssociativeCache::HIT_LATENCY);
-        assert!(lat < ptw + SetAssociativeCache::HIT_LATENCY);
+        assert!(e2e_latency > SetAssociativeCache::HIT_LATENCY);
+        // Row buffer hit 22 + 4 + cache hit 4 = 30
+        assert_eq!(e2e_latency, 30);
     }
 
     #[test]
