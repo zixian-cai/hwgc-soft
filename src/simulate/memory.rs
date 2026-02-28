@@ -6,6 +6,11 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Display};
 use std::num::NonZeroUsize;
 
+/// log2 of the cache line size in bytes.
+const LOG_LINE_SIZE: usize = 6;
+/// Cache line size in bytes.
+const LINE_SIZE: usize = 1 << LOG_LINE_SIZE;
+
 /// Processor Work references virtual addresses which represents heap objects and references.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VirtualAddress(pub u64);
@@ -31,12 +36,6 @@ impl VirtualAddress {
 pub struct PhysicalAddress(pub u64);
 
 impl PhysicalAddress {
-    /// log2 of the cache line size in bytes.
-    const LOG_LINE_SIZE: usize = 6;
-    /// Cache line size in bytes.
-    #[allow(dead_code)]
-    const LINE_SIZE: usize = 1 << Self::LOG_LINE_SIZE;
-
     /// Returns the physical page number (PPN): the address with page-offset
     /// bits zeroed.  Like VPN, this is the full address-width value with the
     /// offset portion cleared, not just the high-order bits.
@@ -46,7 +45,7 @@ impl PhysicalAddress {
 
     /// Returns the cache line index for this physical address.
     fn cache_line(self) -> u64 {
-        self.0 >> Self::LOG_LINE_SIZE
+        self.0 >> LOG_LINE_SIZE
     }
 }
 
@@ -277,13 +276,13 @@ impl FullyAssociativeCache {
     #[allow(dead_code)]
     pub fn new(capacity: usize, rank_option: DDR4RankOption, page_size: PageSize) -> Self {
         assert!(
-            capacity >= PhysicalAddress::LINE_SIZE
-                && capacity.is_multiple_of(PhysicalAddress::LINE_SIZE),
+            capacity >= LINE_SIZE
+                && capacity.is_multiple_of(LINE_SIZE),
             "Cache capacity must be a multiple of line size"
         );
         FullyAssociativeCache {
             cache: LruCache::new(
-                NonZeroUsize::new(capacity / PhysicalAddress::LINE_SIZE).unwrap(),
+                NonZeroUsize::new(capacity / LINE_SIZE).unwrap(),
             ),
             stats: CacheStats::default(),
             rank: DDR4Rank::new(rank_option),
@@ -376,10 +375,10 @@ impl SetAssociativeCache {
         );
         let set_index_bits = num_sets.trailing_zeros() as usize;
         debug_assert!(
-            PhysicalAddress::LOG_LINE_SIZE + set_index_bits <= page_size.page_shift() as usize,
+            LOG_LINE_SIZE + set_index_bits <= page_size.page_shift() as usize,
             "VIPT invariant violated: set-index bits [{}..{}) exceed page offset {} for {:?}",
-            PhysicalAddress::LOG_LINE_SIZE,
-            PhysicalAddress::LOG_LINE_SIZE + set_index_bits,
+            LOG_LINE_SIZE,
+            LOG_LINE_SIZE + set_index_bits,
             page_size.page_shift(),
             page_size,
         );
@@ -397,7 +396,7 @@ impl SetAssociativeCache {
     /// VIPT: set index uses virtual address bits (within page offset), so
     /// this can run concurrently with TLB translation.
     fn get_set_idx(&self, vaddr: VirtualAddress) -> usize {
-        let line = vaddr.0 >> PhysicalAddress::LOG_LINE_SIZE;
+        let line = vaddr.0 >> LOG_LINE_SIZE;
         (line as usize) % self.cache_sets.len()
     }
 }
