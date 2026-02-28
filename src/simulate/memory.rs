@@ -26,8 +26,7 @@ impl VirtualAddress {
     /// Constructs a physical address by combining the given PPN with this
     /// virtual address's page offset.
     pub fn to_physical(self, ppn: u64, page_size: PageSize) -> PhysicalAddress {
-        let offset = self.0 & !page_size.page_mask();
-        PhysicalAddress(ppn | offset)
+        PhysicalAddress(ppn | page_size.page_offset(self.0))
     }
 }
 
@@ -77,6 +76,11 @@ impl PageSize {
 
     fn page_mask(self) -> u64 {
         !((1u64 << self.page_shift()) - 1)
+    }
+
+    /// Extracts the within-page offset from an address.
+    pub fn page_offset(self, addr: u64) -> u64 {
+        addr & !self.page_mask()
     }
 }
 
