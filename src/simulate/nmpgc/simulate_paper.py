@@ -10,6 +10,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("heapdumps", type=Path)
 parser.add_argument("--4kb", dest="four_kb", action="store_true",
                     help="Use 4 KB pages instead of the default 2 MB")
+parser.add_argument("--ptw-base-latency", type=int, default=None,
+                    help="Per-level PTW latency in cycles (default: 6)")
 args = parser.parse_args()
 
 heapdumps = args.heapdumps
@@ -36,6 +38,8 @@ for benchmark in heapdumps.iterdir():
                     "./target/release/hwgc_soft {} -o OpenJDK simulate"
                     " -p 8 -a NMPGC --use-dramsim3 --page-size {}"
                 ).format(str(heapdump), page_size)
+                if args.ptw_base_latency is not None:
+                    cmd += f" --ptw-base-latency {args.ptw_base_latency}"
                 jobs.append((cmd, output_path))
 
 total = len(jobs)

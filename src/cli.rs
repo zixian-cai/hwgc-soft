@@ -90,6 +90,9 @@ pub struct SimulationArgs {
     pub(crate) topology: TopologyChoice,
     #[arg(long, value_enum, default_value_t = PageSize::TwoMB)]
     pub(crate) page_size: PageSize,
+    /// Per-level latency (in cycles) for the page table walker.
+    #[arg(long, default_value_t = 6)]
+    pub(crate) ptw_base_latency: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]

@@ -116,21 +116,31 @@ impl TlbStats {
 /// Latency varies by page size, modelling the number of page table levels
 /// traversed in an Sv39/Sv48-style radix tree (as used by RISC-V and
 /// similar to x86_64 four-level paging).
-struct PageTableWalker;
+struct PageTableWalker {
+    /// Per-level latency in cycles (L2/L3 hit for the page table entry).
+    base_latency: usize,
+}
 
 impl PageTableWalker {
-    /// Latency in cycles for a page table walk, determined by the number
-    /// of levels traversed.  Each level costs ~6 cycles (L2/L3 hit for
-    /// the page table entry).
-    fn latency(page_size: PageSize) -> usize {
+    fn new(base_latency: usize) -> Self {
+        Self { base_latency }
+    }
+
+    /// Number of page-table levels traversed for a given page size.
+    fn levels(page_size: PageSize) -> usize {
         match page_size {
             // 4 levels: PML4 → PDP → PD → PT
-            PageSize::FourKB => 30,
+            PageSize::FourKB => 5,
             // 3 levels: PML4 → PDP → PD (large page)
-            PageSize::TwoMB | PageSize::FourMB => 24,
+            PageSize::TwoMB | PageSize::FourMB => 4,
             // 2 levels: PML4 → PDP (huge page)
-            PageSize::OneGB => 18,
+            PageSize::OneGB => 3,
         }
+    }
+
+    /// Latency in cycles for a page table walk.
+    fn latency(&self, page_size: PageSize) -> usize {
+        Self::levels(page_size) * self.base_latency
     }
 
     fn walk(&self, vaddr: VirtualAddress, page_size: PageSize) -> (PhysicalAddress, usize) {
@@ -138,7 +148,7 @@ impl PageTableWalker {
         // outside the range of the underlying memory model (currently 36 bits /
         // 64 GiB), and virtual addresses that differ only in higher bits are
         // mapped to the same physical address, inflating locality.
-        (PhysicalAddress(vaddr.0), Self::latency(page_size))
+        (PhysicalAddress(vaddr.0), self.latency(page_size))
     }
 }
 
@@ -189,7 +199,7 @@ impl Tlb {
         }
     }
 
-    pub fn new(page_size: PageSize) -> Self {
+    pub fn new(page_size: PageSize, ptw_base_latency: usize) -> Self {
         let entries = Self::tlb_entries(page_size);
         let ways = Self::tlb_ways(page_size);
         debug_assert!(
@@ -205,7 +215,7 @@ impl Tlb {
         Tlb {
             sets,
             page_size,
-            ptw: PageTableWalker,
+            ptw: PageTableWalker::new(ptw_base_latency),
             stats: TlbStats::default(),
         }
     }
@@ -275,7 +285,12 @@ pub(super) struct FullyAssociativeCache {
 
 impl FullyAssociativeCache {
     #[allow(dead_code)]
-    pub fn new(capacity_byte: usize, rank_option: DDR4RankOption, page_size: PageSize) -> Self {
+    pub fn new(
+        capacity_byte: usize,
+        rank_option: DDR4RankOption,
+        page_size: PageSize,
+        ptw_base_latency: usize,
+    ) -> Self {
         assert!(
             capacity_byte >= LINE_SIZE && capacity_byte.is_multiple_of(LINE_SIZE),
             "Cache capacity must be a multiple of line size"
@@ -284,7 +299,7 @@ impl FullyAssociativeCache {
             cache: LruCache::new(NonZeroUsize::new(capacity_byte / LINE_SIZE).unwrap()),
             stats: CacheStats::default(),
             rank: DDR4Rank::new(rank_option),
-            tlb: Tlb::new(page_size),
+            tlb: Tlb::new(page_size, ptw_base_latency),
         }
     }
 }
@@ -359,6 +374,7 @@ impl SetAssociativeCache {
         num_ways: usize,
         rank_option: DDR4RankOption,
         page_size: PageSize,
+        ptw_base_latency: usize,
     ) -> Self {
         assert!(
             num_sets > 0 && num_ways > 0,
@@ -388,7 +404,7 @@ impl SetAssociativeCache {
             cache_sets,
             stats: CacheStats::default(),
             rank: DDR4Rank::new(rank_option),
-            tlb: Tlb::new(page_size),
+            tlb: Tlb::new(page_size, ptw_base_latency),
         }
     }
 
@@ -788,7 +804,7 @@ mod tests {
 
     #[test]
     fn test_fully_associative_cache() {
-        let mut cache = FullyAssociativeCache::new(64, DDR4RankOption::Naive, PageSize::FourKB);
+        let mut cache = FullyAssociativeCache::new(64, DDR4RankOption::Naive, PageSize::FourKB, 6);
         // First access to page: TLB miss, cache miss → includes PTW + DRAM
         assert!(cache.read(VirtualAddress(0b1_000000_000000)) > FullyAssociativeCache::HIT_LATENCY);
         // Same page, cache hit, TLB hit → write still goes to DRAM (write-through)
@@ -823,7 +839,7 @@ mod tests {
 
     #[test]
     fn test_set_associative_cache() {
-        let mut cache = SetAssociativeCache::new(2, 1, DDR4RankOption::Naive, PageSize::FourKB);
+        let mut cache = SetAssociativeCache::new(2, 1, DDR4RankOption::Naive, PageSize::FourKB, 6);
         // First access: TLB miss + cache miss
         assert!(cache.read(VirtualAddress(0)) > SetAssociativeCache::HIT_LATENCY);
         // Same page + same line: TLB hit + cache hit
@@ -889,12 +905,13 @@ mod tests {
 
     #[test]
     fn test_tlb_hit_miss() {
-        let mut tlb = Tlb::new(PageSize::FourKB);
+        let mut tlb = Tlb::new(PageSize::FourKB, 6);
+        let ptw = PageTableWalker::new(6);
         // Miss on first access (read)
         // Note 0x1000 = 4096
         let resp = tlb.translate(VirtualAddress(0x1000), false);
         assert_eq!(resp.paddr, PhysicalAddress(0x1000)); // identity mapping
-        assert_eq!(resp.latency, PageTableWalker::latency(PageSize::FourKB));
+        assert_eq!(resp.latency, ptw.latency(PageSize::FourKB));
         assert!(!resp.hit);
         assert_eq!(tlb.stats.read_misses, 1);
 
@@ -908,7 +925,8 @@ mod tests {
 
     #[test]
     fn test_tlb_eviction() {
-        let mut tlb = Tlb::new(PageSize::FourKB);
+        let mut tlb = Tlb::new(PageSize::FourKB, 6);
+        let ptw = PageTableWalker::new(6);
         // 64 entries, 4-way, 16 sets. Fill one set (4 pages mapping to same set)
         let pages_per_set = Tlb::tlb_ways(PageSize::FourKB);
         let num_sets = Tlb::tlb_entries(PageSize::FourKB) / pages_per_set;
@@ -920,7 +938,7 @@ mod tests {
         }
         // The first page should have been evicted (LRU), re-access → miss
         let resp = tlb.translate(VirtualAddress(0), false);
-        assert_eq!(resp.latency, PageTableWalker::latency(PageSize::FourKB));
+        assert_eq!(resp.latency, ptw.latency(PageSize::FourKB));
         assert!(!resp.hit);
     }
 
@@ -932,11 +950,12 @@ mod tests {
             PageSize::FourMB,
             PageSize::OneGB,
         ] {
-            let mut tlb = Tlb::new(ps);
+            let mut tlb = Tlb::new(ps, 6);
+            let ptw = PageTableWalker::new(6);
             let base = 1u64 << ps.page_shift();
             // First access: miss
             let resp = tlb.translate(VirtualAddress(base), false);
-            assert_eq!(resp.latency, PageTableWalker::latency(ps));
+            assert_eq!(resp.latency, ptw.latency(ps));
             assert!(!resp.hit);
             // Same page, different offset: hit
             let resp = tlb.translate(VirtualAddress(base + 64), false);
@@ -947,7 +966,7 @@ mod tests {
 
     #[test]
     fn test_tlb_read_write_stats() {
-        let mut tlb = Tlb::new(PageSize::FourKB);
+        let mut tlb = Tlb::new(PageSize::FourKB, 6);
         // Read miss
         tlb.translate(VirtualAddress(0x1000), false);
         assert_eq!(tlb.stats.read_misses, 1);
@@ -971,7 +990,7 @@ mod tests {
 
     #[test]
     fn test_vipt_tlb_hit_cache_hit() {
-        let mut cache = SetAssociativeCache::new(16, 4, DDR4RankOption::Naive, PageSize::FourKB);
+        let mut cache = SetAssociativeCache::new(16, 4, DDR4RankOption::Naive, PageSize::FourKB, 6);
         // Warm up both TLB and cache
         cache.read(VirtualAddress(0x1000));
         // TLB hit + cache hit
@@ -985,7 +1004,7 @@ mod tests {
 
     #[test]
     fn test_vipt_tlb_hit_cache_miss() {
-        let mut cache = SetAssociativeCache::new(16, 4, DDR4RankOption::Naive, PageSize::FourKB);
+        let mut cache = SetAssociativeCache::new(16, 4, DDR4RankOption::Naive, PageSize::FourKB, 6);
         // Warm up TLB for 0x1xxx page
         cache.read(VirtualAddress(0x1000));
         // Access different line on same page: TLB hit, cache miss
@@ -1000,8 +1019,8 @@ mod tests {
     fn test_vipt_tlb_miss_cache_hit() {
         // 64 sets is the maximum for VIPT with 4KB pages (set-index bits [6..12)
         // must stay within the 12-bit page offset).
-        let mut cache = SetAssociativeCache::new(64, 4, DDR4RankOption::Naive, PageSize::FourKB);
-        let ptw = PageTableWalker::latency(PageSize::FourKB);
+        let mut cache = SetAssociativeCache::new(64, 4, DDR4RankOption::Naive, PageSize::FourKB, 6);
+        let ptw = PageTableWalker::new(6).latency(PageSize::FourKB);
         // Warm TLB + cache for page 0x1000 (VPN page number 1, TLB set 1).
         cache.read(VirtualAddress(0x1000));
         assert_eq!(
@@ -1026,8 +1045,8 @@ mod tests {
 
     #[test]
     fn test_vipt_tlb_miss_cache_miss() {
-        let mut cache = SetAssociativeCache::new(16, 4, DDR4RankOption::Naive, PageSize::FourKB);
-        let ptw = PageTableWalker::latency(PageSize::FourKB);
+        let mut cache = SetAssociativeCache::new(16, 4, DDR4RankOption::Naive, PageSize::FourKB, 6);
+        let ptw = PageTableWalker::new(6).latency(PageSize::FourKB);
         // Very first access: TLB miss + cache miss
         let lat = cache.read(VirtualAddress(0x1000));
         // Must include PTW + cache hit latency + DRAM

@@ -78,6 +78,7 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
                     rank_option.clone(),
                     dimm_to_rank_latency,
                     args.page_size,
+                    args.ptw_base_latency,
                 )
             })
             .collect();
@@ -425,6 +426,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         rank_option: DDR4RankOption,
         dimm_to_rank_latency: usize,
         page_size: PageSize,
+        ptw_base_latency: usize,
     ) -> Self {
         NMPProcessor {
             id,
@@ -434,7 +436,7 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             works: VecDeque::new(),
             ticks: 0,
             // 32 KB
-            cache: SetAssociativeCache::new(64, 8, rank_option, page_size),
+            cache: SetAssociativeCache::new(64, 8, rank_option, page_size, ptw_base_latency),
             work_count: HashMap::new(),
             idle_ranges: vec![],
             idle_start: None,
