@@ -173,10 +173,15 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
                 }
             }
             NMPProcessorWork::SendMessage(msg) => {
-                // Sender pays only the local DIMM-to-rank latency to hand the
-                // message to the link controller; the network fabric handles
-                // hop-by-hop transit.
-                push_stall(&mut self.works, self.dimm_to_rank_latency);
+                let send_latency = if self.blocking_messaging {
+                    self.blocking_send_latency[msg.recipient]
+                } else {
+                    // By default sender pays only the local DIMM-to-rank
+                    // latency to hand the message to the link controller; the
+                    // network fabric handles hop-by-hop transit.
+                    self.dimm_to_rank_latency
+                };
+                push_stall(&mut self.works, send_latency);
                 trace!(
                     "[P{}] sending message to P{}: {:?}",
                     self.id,

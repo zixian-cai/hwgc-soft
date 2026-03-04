@@ -165,9 +165,25 @@ impl Network {
     }
 }
 
+/// Returns the total message transit latency (in cycles) from `from_dimm`
+/// to `to_dimm`: the sender's DIMM-to-rank overhead plus per-hop link
+/// latency. This excludes the receiver's ReadInbox latency.
+pub(super) fn get_message_latency(
+    topology: &dyn Topology,
+    from_dimm: DimmId,
+    to_dimm: DimmId,
+) -> usize {
+    if from_dimm == to_dimm {
+        DIMM_TO_RANK_LATENCY
+    } else {
+        DIMM_TO_RANK_LATENCY + topology.get_route(from_dimm, to_dimm).len() * PER_HOP_LATENCY
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::topology::LineTopology;
+    use super::super::topology::RingTopology;
     use super::super::topology::Topology;
     use super::super::work::NMPMessage;
     use super::*;
@@ -405,5 +421,57 @@ mod tests {
         assert_eq!(link.messages_forwarded, 2);
         // Since they do not overlap in time, the peak flits per tick should just be 1.
         assert_eq!(link.peak_flits_per_tick, 1);
+    }
+
+    // ─── get_message_latency tests ──────────────────────────────────────
+    #[test]
+    fn test_message_latency_same_dimm() {
+        let topo = LineTopology::new();
+        // Same DIMM: only the DIMM-to-rank overhead, no network hops.
+        assert_eq!(
+            get_message_latency(&topo, DimmId(0), DimmId(0)),
+            DIMM_TO_RANK_LATENCY
+        );
+    }
+
+    #[test]
+    fn test_message_latency_single_hop_line() {
+        let topo = LineTopology::new();
+        // DIMM 0 -> DIMM 2: 1 hop in line topology
+        let latency = get_message_latency(&topo, DimmId(0), DimmId(2));
+        assert_eq!(latency, DIMM_TO_RANK_LATENCY + PER_HOP_LATENCY);
+    }
+
+    #[test]
+    fn test_message_latency_multi_hop_line() {
+        let topo = LineTopology::new();
+        // DIMM 0 -> DIMM 3: 3 hops (0->2->1->3)
+        let latency = get_message_latency(&topo, DimmId(0), DimmId(3));
+        assert_eq!(latency, DIMM_TO_RANK_LATENCY + 3 * PER_HOP_LATENCY);
+    }
+
+    #[test]
+    fn test_message_latency_ring_shortest_path() {
+        let topo = RingTopology::new();
+        // DIMM 0 -> DIMM 3: ring takes the shorter 1-hop route (CCW)
+        let latency = get_message_latency(&topo, DimmId(0), DimmId(3));
+        assert_eq!(latency, DIMM_TO_RANK_LATENCY + PER_HOP_LATENCY);
+    }
+
+    #[test]
+    fn test_message_latency_symmetry() {
+        let topo = LineTopology::new();
+        // Latency should be the same in both directions for the same DIMM pair.
+        for from in 0u8..4 {
+            for to in 0u8..4 {
+                let fwd = get_message_latency(&topo, DimmId(from), DimmId(to));
+                let rev = get_message_latency(&topo, DimmId(to), DimmId(from));
+                assert_eq!(
+                    fwd, rev,
+                    "Asymmetric latency for DIMM {} <-> {}: {} vs {}",
+                    from, to, fwd, rev
+                );
+            }
+        }
     }
 }

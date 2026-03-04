@@ -93,6 +93,11 @@ pub struct SimulationArgs {
     /// Per-level latency (in cycles) for the page table walker.
     #[arg(long, default_value_t = 6)]
     pub(crate) ptw_base_latency: usize,
+    /// Use blocking messaging: sender stalls for the full message transit
+    /// latency (rank-to-DIMM + all link hops), excluding the final ReadInbox
+    /// latency.
+    #[arg(long, default_value_t = false)]
+    pub(crate) blocking_messaging: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum, Debug)]

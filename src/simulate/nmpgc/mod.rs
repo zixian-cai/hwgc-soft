@@ -71,14 +71,28 @@ impl<const LOG_NUM_THREADS: u8> SimulationArchitecture for NMPGC<LOG_NUM_THREADS
         let dimm_to_rank_latency = network::DIMM_TO_RANK_LATENCY;
 
         // Convert &[u64] into Vec<u64>
-        let mut processors: Vec<NMPProcessor<LOG_NUM_THREADS>> = (0..Self::NUM_THREADS)
+        let num_processors = Self::NUM_THREADS as usize;
+        let mut processors: Vec<NMPProcessor<LOG_NUM_THREADS>> = (0..num_processors)
             .map(|id| {
+                let sender_dimm = DimmId::from(RankId(id as u8));
+                let blocking_send_latency: Vec<usize> = (0..num_processors)
+                    .map(|recipient| {
+                        // Even though we compute the entry when recipient == id
+                        // This is not used in practice, because no message is
+                        // sent to oneself. Ratther, new work is directly
+                        // pushed using self.works.push_back in work.rs
+                        let recipient_dimm = DimmId::from(RankId(recipient as u8));
+                        network::get_message_latency(&*topology, sender_dimm, recipient_dimm)
+                    })
+                    .collect();
                 NMPProcessor::new(
-                    id as usize,
+                    id,
                     rank_option.clone(),
                     dimm_to_rank_latency,
                     args.page_size,
                     args.ptw_base_latency,
+                    args.blocking_messaging,
+                    blocking_send_latency,
                 )
             })
             .collect();
@@ -416,6 +430,10 @@ struct NMPProcessor<const LOG_NUM_THREADS: u8> {
     frequency_ghz: f64, // Only valid for DDR4-3200
     /// Local overhead for handing a message to the DIMM link controller.
     dimm_to_rank_latency: usize,
+    /// Whether the processor blocks for the full transit latency on send.
+    blocking_messaging: bool,
+    /// Precomputed blocking send latency to each processor (indexed by recipient ID).
+    blocking_send_latency: Vec<usize>,
     edge_chunks: Vec<(u64, u64)>,
     edge_chunk_cursor: (usize, u64),
 }
@@ -427,6 +445,8 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
         dimm_to_rank_latency: usize,
         page_size: PageSize,
         ptw_base_latency: usize,
+        blocking_messaging: bool,
+        blocking_send_latency: Vec<usize>,
     ) -> Self {
         NMPProcessor {
             id,
@@ -443,6 +463,8 @@ impl<const LOG_NUM_THREADS: u8> NMPProcessor<LOG_NUM_THREADS> {
             frequency_ghz: 1.6,
             idle_readinbox_ticks: 0,
             dimm_to_rank_latency,
+            blocking_messaging,
+            blocking_send_latency,
             edge_chunks: vec![],
             edge_chunk_cursor: (0, 0),
         }
