@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 # ./src/simulate/nmpgc/simulate_paper.py ../heapdumps/sampled
 from pathlib import Path
-import sys
+import argparse
 import subprocess
 import os
 import time
 
-heapdumps = Path(sys.argv[1])
+parser = argparse.ArgumentParser()
+parser.add_argument("heapdumps", type=Path)
+parser.add_argument("--4kb", dest="four_kb", action="store_true",
+                    help="Use 4 KB pages instead of the default 2 MB")
+args = parser.parse_args()
+
+heapdumps = args.heapdumps
 max_workers = max(1, os.cpu_count() // 2)
+page_size = "FourKB" if args.four_kb else "TwoMB"
+log_suffix = ".4kb.log" if args.four_kb else ".log"
 
 # Build environment: conditionally add protoc paths.
 env = dict(os.environ)
@@ -23,11 +31,11 @@ for benchmark in heapdumps.iterdir():
         for heapdump in benchmark.iterdir():
             if heapdump.suffix == ".zst":
                 gc_number = heapdump.stem.split(".")[-2]
-                output_path = f"{benchmark.name}.{gc_number}.log"
+                output_path = f"{benchmark.name}.{gc_number}{log_suffix}"
                 cmd = (
                     "./target/release/hwgc_soft {} -o OpenJDK simulate"
-                    " -p 8 -a NMPGC --use-dramsim3 --page-size TwoMB"
-                ).format(str(heapdump))
+                    " -p 8 -a NMPGC --use-dramsim3 --page-size {}"
+                ).format(str(heapdump), page_size)
                 jobs.append((cmd, output_path))
 
 total = len(jobs)
