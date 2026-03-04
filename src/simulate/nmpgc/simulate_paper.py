@@ -12,12 +12,19 @@ parser.add_argument("--4kb", dest="four_kb", action="store_true",
                     help="Use 4 KB pages instead of the default 2 MB")
 parser.add_argument("--ptw-base-latency", type=int, default=None,
                     help="Per-level PTW latency in cycles (default: 6)")
+parser.add_argument("--blocking-messaging", action="store_true",
+                    help="Sender stalls for the full message transit latency")
 args = parser.parse_args()
 
 heapdumps = args.heapdumps
 max_workers = max(1, os.cpu_count() // 2)
 page_size = "FourKB" if args.four_kb else "TwoMB"
-log_suffix = ".4kb.log" if args.four_kb else ".log"
+log_suffix = ".4kb" if args.four_kb else ""
+if args.ptw_base_latency is not None:
+    log_suffix += f".ptw{args.ptw_base_latency}"
+if args.blocking_messaging:
+    log_suffix += ".blocking"
+log_suffix += ".log"
 
 # Build environment: conditionally add protoc paths.
 env = dict(os.environ)
@@ -40,6 +47,8 @@ for benchmark in heapdumps.iterdir():
                 ).format(str(heapdump), page_size)
                 if args.ptw_base_latency is not None:
                     cmd += f" --ptw-base-latency {args.ptw_base_latency}"
+                if args.blocking_messaging:
+                    cmd += " --blocking-messaging"
                 jobs.append((cmd, output_path))
 
 total = len(jobs)
