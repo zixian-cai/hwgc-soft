@@ -14,6 +14,8 @@ parser.add_argument("--ptw-base-latency", type=int, default=None,
                     help="Per-level PTW latency in cycles (default: 6)")
 parser.add_argument("--blocking-messaging", action="store_true",
                     help="Sender stalls for the full message transit latency")
+parser.add_argument("--no-dramsim3", action="store_true",
+                    help="Run without DRAMsim3 memory simulation")
 args = parser.parse_args()
 
 heapdumps = args.heapdumps
@@ -24,6 +26,8 @@ if args.ptw_base_latency is not None:
     log_suffix += f".ptw{args.ptw_base_latency}"
 if args.blocking_messaging:
     log_suffix += ".blocking"
+if args.no_dramsim3:
+    log_suffix += ".no-dramsim3"
 log_suffix += ".log"
 
 # Build environment: conditionally add protoc paths.
@@ -43,8 +47,12 @@ for benchmark in heapdumps.iterdir():
                 output_path = f"{benchmark.name}.{gc_number}{log_suffix}"
                 cmd = (
                     "./target/release/hwgc_soft {} -o OpenJDK simulate"
-                    " -p 8 -a NMPGC --use-dramsim3 --page-size {}"
-                ).format(str(heapdump), page_size)
+                    " -p 8 -a NMPGC{} --page-size {}"
+                ).format(
+                    str(heapdump),
+                    "" if args.no_dramsim3 else " --use-dramsim3",
+                    page_size,
+                )
                 if args.ptw_base_latency is not None:
                     cmd += f" --ptw-base-latency {args.ptw_base_latency}"
                 if args.blocking_messaging:
